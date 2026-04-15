@@ -1,17 +1,23 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="uk" class="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Облік ЗІП: Механік</title>
     
     <link rel="manifest" id="manifest-link">
-    <meta name="theme-color" content="#10b981">
+    <meta name="theme-color" content="#1e293b">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Облік ЗІП">
     <link rel="apple-touch-icon" href="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        // Конфігурація Tailwind для правильної роботи темної теми за класом (а не за налаштуваннями ОС)
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
     <style>
         /* Base Variables for Theming */
         :root {
@@ -137,9 +143,6 @@
             </div>
 
             <div class="absolute top-0 right-0 flex flex-col items-end">
-                <button id="themeToggle" class="p-2 rounded-full text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500" title="Темна/Світла тема">
-                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
-                </button>
                 <div class="network-status shadow-sm border border-gray-200 dark:border-gray-700 cursor-pointer" id="networkStatusBtn" title="Натисніть для синхронізації">
                     <span class="status-dot online" id="statusDot"></span>
                     <span id="statusText">Онлайн</span>
@@ -266,7 +269,7 @@
     <script>
         // --- НАЛАШТУВАННЯ ---
         // Оновлений URL Google Script
-        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxTNVjSzbo6xv0F_wAF1DEvnOwOf5eEyxnfRSfNih-88kH6MRlHcI7bj8jEmNT5_3h6/exec'; 
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzGmeoN4wVy6e9LoWTSzy4ZDP_nmZlvHXDW5oYHxBpiNrLsioRDWptQ-LSSAVug3LRh/exec'; 
 
         // Тестові дані з імітацією структури кількох аркушів (Fallback)
         const MOCK_DATA = [
@@ -348,19 +351,6 @@
         };
 
         const customAlert = (msg) => showCustomDialog(msg, false);
-
-        // --- Тема ---
-        const toggleTheme = () => {
-            document.body.classList.toggle('dark');
-            localStorage.setItem('theme', document.body.classList.contains('dark') ? 'dark' : 'light');
-        };
-
-        const initTheme = () => {
-            if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                document.body.classList.add('dark');
-            }
-            document.getElementById('themeToggle').addEventListener('click', toggleTheme);
-        };
 
         // --- Мережа та Офлайн ---
         const updateNetworkStatus = () => {
@@ -745,7 +735,6 @@
 
         // --- Ініціалізація ---
         document.addEventListener('DOMContentLoaded', () => {
-            initTheme();
             updateNetworkStatus();
             
             const savedMechanic = localStorage.getItem('selectedMechanic');
