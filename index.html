@@ -265,10 +265,10 @@
 
     <script>
         // --- НАЛАШТУВАННЯ ---
-        // ВАЖЛИВО! Сюди вставте URL нового Google Apps Script
-        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzGmeoN4wVy6e9LoWTSzy4ZDP_nmZlvHXDW5oYHxBpiNrLsioRDWptQ-LSSAVug3LRh/exec'; 
+        // Оновлений URL Google Script
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxTNVjSzbo6xv0F_wAF1DEvnOwOf5eEyxnfRSfNih-88kH6MRlHcI7bj8jEmNT5_3h6/exec'; 
 
-        // Тестові дані з імітацією структури кількох аркушів
+        // Тестові дані з імітацією структури кількох аркушів (Fallback)
         const MOCK_DATA = [
             {
                 name: "Підшипники",
@@ -427,15 +427,6 @@
             }
 
             try {
-                if (GOOGLE_SCRIPT_URL.includes('ВАШ_ІДЕНТИФІКАТОР')) {
-                    setTimeout(() => {
-                        allData = MOCK_DATA;
-                        renderState();
-                        loader.classList.add('hidden');
-                    }, 500);
-                    return;
-                }
-
                 if (!navigator.onLine) {
                     const cached = localStorage.getItem(CACHE_KEY);
                     if (cached) {
@@ -698,8 +689,8 @@
             btn.disabled = true;
 
             try {
-                if (!navigator.onLine || GOOGLE_SCRIPT_URL.includes('ВАШ_ІДЕНТИФІКАТОР')) {
-                    throw new Error("Offline or Dev Mode");
+                if (!navigator.onLine) {
+                    throw new Error("Offline");
                 }
 
                 await fetch(GOOGLE_SCRIPT_URL, {
