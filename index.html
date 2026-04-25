@@ -1,25 +1,18 @@
 <!DOCTYPE html>
-<html lang="uk" class="dark">
+<html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Облік ЗІП: Механік</title>
     
     <link rel="manifest" id="manifest-link">
-    <meta name="theme-color" content="#1e293b">
+    <meta name="theme-color" content="#f8fafc">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Облік ЗІП">
     <link rel="apple-touch-icon" href="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        // Конфігурація Tailwind для правильної роботи темної теми за класом (а не за налаштуваннями ОС)
-        tailwind.config = {
-            darkMode: 'class'
-        }
-    </script>
     <style>
-        /* Base Variables for Theming */
         :root {
             --bg-color: #f8fafc;
             --card-bg-color: #ffffff;
@@ -33,18 +26,6 @@
             --error-btn-bg: #ef4444;
             --warning-bg: #fef3c7;
             --warning-border: #f59e0b;
-        }
-
-        .dark {
-            --bg-color: #1e293b;
-            --card-bg-color: #334155;
-            --text-color: #f1f5f9;
-            --text-muted-color: #94a3b8;
-            --item-bg-color: #475569;
-            --item-hover-bg-color: #64748b;
-            --border-color: #475569;
-            --warning-bg: rgba(245, 158, 11, 0.2);
-            --warning-border: #d97706;
         }
 
         body {
@@ -80,13 +61,12 @@
         .modal-overlay { background-color: rgba(0, 0, 0, 0.6); z-index: 1000; backdrop-filter: blur(2px); }
         .modal-content { z-index: 1001; }
         
-        input[type="number"], input[type="text"], input[type="date"] {
+        input[type="number"], input[type="text"], input[type="date"], select {
             background-color: var(--card-bg-color);
             color: var(--text-color);
             border: 1px solid var(--border-color);
         }
 
-        /* Network Status Indicator */
         .network-status {
             font-size: 0.75rem;
             display: flex;
@@ -100,14 +80,12 @@
             margin-left: auto;
             width: fit-content;
         }
-        .dark .network-status { background: rgba(0,0,0,0.3); }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
         .status-dot.online { background: #10b981; }
         .status-dot.offline { background: #ef4444; }
         .status-dot.syncing { background: #f59e0b; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-        /* Loader */
         .loader {
             border: 3px solid var(--border-color);
             border-top: 3px solid var(--active-btn-bg);
@@ -137,32 +115,48 @@
     <div class="container mx-auto max-w-3xl p-4 sm:p-6 relative">
         <header class="relative text-center mb-6">
             <div class="absolute top-0 left-0 text-center">
-                <button onclick="fetchData()" class="inline-block p-2 rounded-full text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500" title="Оновити дані">
+                <button onclick="fetchData()" class="inline-block p-2 rounded-full text-muted transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-sm border border-gray-200" title="Оновити дані">
                     <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                 </button>
             </div>
 
             <div class="absolute top-0 right-0 flex flex-col items-end">
-                <div class="network-status shadow-sm border border-gray-200 dark:border-gray-700 cursor-pointer" id="networkStatusBtn" title="Натисніть для синхронізації">
+                <div class="network-status shadow-sm border border-gray-200 cursor-pointer" id="networkStatusBtn" title="Натисніть для синхронізації">
                     <span class="status-dot online" id="statusDot"></span>
                     <span id="statusText">Онлайн</span>
                 </div>
             </div>
             
             <img src="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp" alt="Foodline Logo" class="w-16 h-auto mx-auto mb-2 rounded-lg" onerror="this.style.display='none'">
-            <h1 class="text-xl sm:text-2xl font-bold">Журнал використання ЗІП</h1>
+            <h1 class="text-xl sm:text-2xl font-bold text-gray-800">Журнал використання ЗІП</h1>
         </header>
 
         <!-- Вибір механіка -->
-        <div class="mb-4 card p-4 rounded-xl shadow-sm border border-gray-200 dark:border-slate-700">
-            <label for="employeeSelect" class="block text-sm font-bold mb-2">Механік (Хто взяв деталь?):</label>
-            <select id="employeeSelect" class="block w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 card font-semibold text-lg">
+        <div class="mb-4 card p-4 rounded-xl shadow-sm border border-gray-200">
+            <label for="employeeSelect" class="block text-sm font-bold mb-2 text-gray-700">Механік (Хто взяв деталь?):</label>
+            <select id="employeeSelect" class="block w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-lg text-gray-800">
                 <option value="">-- Оберіть зі списку --</option>
                 <option value="Свінцов Михайло">Свінцов Михайло</option>
                 <option value="Гора Андрій">Гора Андрій</option>
                 <option value="Галагін Евгеній">Галагін Евгеній</option>
                 <option value="Бузницький Юрій">Бузницький Юрій</option>
             </select>
+        </div>
+
+        <!-- Кнопки дій -->
+        <div class="mb-4 flex flex-wrap gap-2">
+            <button onclick="fetchHistory(true)" class="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-blue-200" title="Історія моїх списань за сьогодні">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Мої за сьогодні
+            </button>
+            <button onclick="fetchHistory(false)" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-gray-200" title="Загальна історія">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                Всі списання
+            </button>
+            <button onclick="forceSendReport()" class="w-full sm:w-auto bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-amber-200" title="Надіслати план закупки на email">
+                <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                Відправити план закупки
+            </button>
         </div>
 
         <!-- Пошук -->
@@ -181,12 +175,12 @@
         <!-- Статус завантаження -->
         <div id="loadingState" class="flex flex-col items-center justify-center py-10 hidden">
             <div class="loader mb-4"></div>
-            <p class="text-muted font-medium">Завантаження бази ЗІП...</p>
+            <p class="text-muted font-medium" id="loadingText">Завантаження бази ЗІП...</p>
         </div>
 
         <!-- В'ю: Список категорій -->
         <div id="categoriesView" class="pb-20">
-            <h2 class="text-lg font-bold mb-3 text-emerald-700 dark:text-emerald-400 px-1">Категорії:</h2>
+            <h2 class="text-lg font-bold mb-3 text-emerald-700 px-1">Категорії:</h2>
             <div id="categoriesContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <!-- Категорії генеруються JS -->
             </div>
@@ -195,15 +189,30 @@
         <!-- В'ю: Список деталей всередині категорії або результати пошуку -->
         <div id="itemsView" class="hidden pb-20">
             <div class="flex items-center mb-4" id="backBtnContainer">
-                <button id="backToCategoriesBtn" class="flex items-center text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 font-bold px-2 py-1 -ml-2 rounded-lg transition-colors">
+                <button id="backToCategoriesBtn" class="flex items-center text-emerald-600 hover:text-emerald-700 font-bold px-2 py-1 -ml-2 rounded-lg transition-colors">
                     <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
                     Назад до категорій
                 </button>
             </div>
-            <h2 id="currentCategoryTitle" class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-200"></h2>
+            <h2 id="currentCategoryTitle" class="text-xl font-bold mb-4 text-gray-800"></h2>
             
-            <div id="inventoryContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div id="inventoryContainer" class="flex flex-col gap-3">
                 <!-- Картки деталей генеруються JS -->
+            </div>
+        </div>
+
+        <!-- В'ю: Історія -->
+        <div id="historyView" class="hidden pb-20">
+            <div class="flex items-center justify-between mb-4">
+                <button onclick="appState.view = 'categories'; renderState();" class="flex items-center text-blue-600 hover:text-blue-700 font-bold px-2 py-1 -ml-2 rounded-lg transition-colors">
+                    <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+                    Назад
+                </button>
+                <h2 id="historyTitle" class="text-xl font-bold text-gray-800">Історія рухів</h2>
+            </div>
+            
+            <div id="historyContainer" class="flex flex-col gap-3">
+                <!-- Історія генерується JS -->
             </div>
         </div>
     </div>
@@ -215,35 +224,35 @@
                 <div class="flex justify-between items-start mb-4">
                     <div>
                         <div class="flex items-center gap-2 mb-1">
-                            <span class="bg-gray-200 dark:bg-slate-700 text-xs font-bold px-2 py-1 rounded" id="modalPartNo"></span>
-                            <span class="text-xs text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-100 dark:bg-emerald-900 px-2 py-1 rounded line-clamp-1" id="modalPartCategory"></span>
+                            <span class="bg-gray-200 text-gray-800 text-xs font-bold px-2 py-1 rounded" id="modalPartNo"></span>
+                            <span class="text-xs text-emerald-700 font-bold bg-emerald-100 px-2 py-1 rounded line-clamp-1" id="modalPartCategory"></span>
                         </div>
-                        <h3 class="text-xl font-bold text-gray-900 dark:text-white" id="modalPartName">6200-2RSH</h3>
+                        <h3 class="text-xl font-bold text-gray-900" id="modalPartName">6200-2RSH</h3>
                         <p class="text-sm text-muted mt-1" id="modalPartEquipment">Twist off-натяжні ролики ременів</p>
                     </div>
-                    <button id="closeUsageModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 ml-2">
+                    <button id="closeUsageModalBtn" class="text-gray-400 hover:text-gray-600 ml-2">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>
 
-                <div class="bg-gray-100 dark:bg-slate-700 p-3 rounded-lg flex justify-between items-center mb-6 border border-gray-200 dark:border-slate-600">
-                    <span class="font-medium text-sm">Поточний залишок:</span>
-                    <span class="font-bold text-lg" id="modalCurrentStock">18 шт</span>
+                <div class="bg-gray-100 p-3 rounded-lg flex justify-between items-center mb-6 border border-gray-200">
+                    <span class="font-medium text-sm text-gray-700">Поточний залишок:</span>
+                    <span class="font-bold text-lg text-gray-900" id="modalCurrentStock">18 шт</span>
                 </div>
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-bold mb-1">Кількість використано (шт):</label>
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Кількість використано (шт):</label>
                         <input type="number" id="useQuantity" min="1" value="1" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold text-lg text-center" inputmode="numeric">
                     </div>
                     
                     <div>
-                        <label class="block text-sm font-bold mb-1">Де було використано:</label>
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Де було використано:</label>
                         <input type="text" id="useLocation" placeholder="Наприклад: Лінія 1, мотор конвеєра" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
                     </div>
 
                     <div>
-                        <label class="block text-sm font-bold mb-1">Дата використання:</label>
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Дата використання:</label>
                         <input type="date" id="useDate" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
                     </div>
                 </div>
@@ -260,54 +269,37 @@
 
     <!-- Кастомний Alert -->
     <div id="customDialogOverlay" class="fixed inset-0 hidden items-center justify-center modal-overlay z-[2000] p-4">
-        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm p-6 text-center transform transition-all">
-            <h3 id="customDialogMessage" class="text-lg font-bold mb-6 text-slate-800 dark:text-white whitespace-pre-wrap"></h3>
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center transform transition-all border border-gray-100">
+            <h3 id="customDialogMessage" class="text-lg font-bold mb-6 text-gray-800 whitespace-pre-wrap"></h3>
             <div class="flex justify-center gap-3" id="customDialogButtons"></div>
         </div>
     </div>
 
     <script>
         // --- НАЛАШТУВАННЯ ---
-        // Оновлений URL Google Script
-        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzGmeoN4wVy6e9LoWTSzy4ZDP_nmZlvHXDW5oYHxBpiNrLsioRDWptQ-LSSAVug3LRh/exec'; 
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyN3iy_TrOXoXPHcp8cfzeZccX7QvpwYKqIvbHMWrWRcOxiIN8LdM6kAlbi2Hz3LcIr/exec'; 
 
-        // Тестові дані з імітацією структури кількох аркушів (Fallback)
         const MOCK_DATA = [
             {
                 name: "Підшипники",
                 items: [
-                    { sheetName: "Підшипники", row: 4, no: "1", model: "6200-2RSH", equipment: "Twist off-натяжні ролики ременів", minStock: 10, currentStock: 18 },
-                    { sheetName: "Підшипники", row: 5, no: "2", model: "6201-2Z", equipment: "Електро пила", minStock: 2, currentStock: 2 },
-                    { sheetName: "Підшипники", row: 6, no: "3", model: "608-2RSH", equipment: "ПакТех-направляючі", minStock: 2, currentStock: 2 },
-                    { sheetName: "Підшипники", row: 7, no: "4", model: "6202-2RS", equipment: "Електродвигун", minStock: 4, currentStock: 15 },
-                    { sheetName: "Підшипники", row: 17, no: "14", model: "6205-DDU", equipment: "Вихідна зірочка дозатора", minStock: 2, currentStock: 5 },
-                    { sheetName: "Підшипники", row: 19, no: "16", model: "UC 204", equipment: "Конвеєри", minStock: 2, currentStock: 5 }
-                ]
-            },
-            {
-                name: "Сальники та Кільця",
-                items: [
-                    { sheetName: "Сальники та Кільця", row: 4, no: "1", model: "Манжета 25х47х7", equipment: "Насоси", minStock: 5, currentStock: 8 },
-                    { sheetName: "Сальники та Кільця", row: 5, no: "2", model: "Кільце O-ring 50x3", equipment: "Трубопроводи", minStock: 10, currentStock: 3 }
-                ]
-            },
-            {
-                name: "Електричні запчастини",
-                items: [
-                    { sheetName: "Електричні запчастини", row: 4, no: "1", model: "Реле Finder 24V", equipment: "Шафи керування", minStock: 3, currentStock: 5 },
-                    { sheetName: "Електричні запчастини", row: 5, no: "2", model: "Датчик індуктивний M12", equipment: "Етикетувальник", minStock: 2, currentStock: 1 }
+                    { sheetName: "Підшипники", row: 4, no: "1", model: "6200-2RSH", equipment: "Twist off-натяжні ролики ременів", minStock: 10, currentStock: 9, supplierName: "ТОВ ПромПідшипник", supplierPhone: "050-123-45-67" },
+                    { sheetName: "Підшипники", row: 5, no: "2", model: "6201-2Z", equipment: "Електро пила", minStock: 2, currentStock: 1 },
+                    { sheetName: "Підшипники", row: 6, no: "3", model: "608-2RSH", equipment: "ПакТех-направляючі", minStock: 2, currentStock: -1, supplierName: "ФОП Іваненко", supplierPhone: "067-987-65-43" },
                 ]
             }
         ];
 
-        let allData = []; // Структура: [{name: 'Категорія', items: [{...}]}]
+        let allData = []; 
+        let historyData = [];
         let appState = {
-            view: 'categories', // 'categories' або 'items'
-            activeCategory: null
+            view: 'categories', 
+            activeCategory: null,
+            filterHistoryToday: false
         };
         let currentSelectedItem = null;
-        const OFFLINE_KEY = 'zipOfflineQueueV2';
-        const CACHE_KEY = 'zipInventoryCacheV2';
+        const OFFLINE_KEY = 'zipOfflineQueueV3';
+        const CACHE_KEY = 'zipInventoryCacheV3';
 
         // --- Custom Dialog System ---
         const showCustomDialog = (message, isConfirm = false) => {
@@ -316,7 +308,7 @@
                 const msgEl = document.getElementById('customDialogMessage');
                 const btnsEl = document.getElementById('customDialogButtons');
 
-                msgEl.textContent = message;
+                msgEl.innerHTML = message; // Дозволяємо HTML замість textContent
                 btnsEl.innerHTML = '';
 
                 const closeDialog = () => {
@@ -326,7 +318,7 @@
 
                 if (isConfirm) {
                     const btnCancel = document.createElement('button');
-                    btnCancel.className = 'px-4 py-2 bg-gray-200 dark:bg-slate-700 text-gray-800 dark:text-white rounded-lg font-semibold hover:bg-gray-300 dark:hover:bg-slate-600 transition-colors';
+                    btnCancel.className = 'px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition-colors';
                     btnCancel.textContent = 'Скасувати';
                     btnCancel.onclick = () => { closeDialog(); resolve(false); };
 
@@ -347,6 +339,45 @@
 
                 overlay.classList.remove('hidden');
                 overlay.classList.add('flex');
+            });
+        };
+
+        const showPasswordDialog = () => {
+            return new Promise((resolve) => {
+                const overlay = document.getElementById('customDialogOverlay');
+                const msgEl = document.getElementById('customDialogMessage');
+                const btnsEl = document.getElementById('customDialogButtons');
+
+                msgEl.innerHTML = 'Введіть пароль для відправки плану:<br><input type="password" id="reportPassword" class="mt-4 w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-center text-lg" placeholder="****">';
+                btnsEl.innerHTML = '';
+
+                const closeDialog = () => {
+                    overlay.classList.add('hidden');
+                    overlay.classList.remove('flex');
+                };
+
+                const btnCancel = document.createElement('button');
+                btnCancel.className = 'px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition-colors';
+                btnCancel.textContent = 'Скасувати';
+                btnCancel.onclick = () => { closeDialog(); resolve(null); };
+
+                const btnOk = document.createElement('button');
+                btnOk.className = 'px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold hover:bg-emerald-600 transition-colors shadow-md';
+                btnOk.textContent = 'Підтвердити';
+                btnOk.onclick = () => {
+                    const pwd = document.getElementById('reportPassword').value;
+                    closeDialog();
+                    resolve(pwd);
+                };
+
+                btnsEl.appendChild(btnCancel);
+                btnsEl.appendChild(btnOk);
+
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+                
+                // Фокус на поле вводу
+                setTimeout(() => document.getElementById('reportPassword').focus(), 100);
             });
         };
 
@@ -410,9 +441,13 @@
         // --- Отримання даних ---
         const fetchData = async (silent = false) => {
             const loader = document.getElementById('loadingState');
+            const loadText = document.getElementById('loadingText');
+            loadText.textContent = "Завантаження бази ЗІП...";
+            
             if (!silent) {
                 document.getElementById('categoriesView').classList.add('hidden');
                 document.getElementById('itemsView').classList.add('hidden');
+                document.getElementById('historyView').classList.add('hidden');
                 loader.classList.remove('hidden');
             }
 
@@ -446,11 +481,89 @@
                 if (cached) {
                     allData = JSON.parse(cached);
                 } else {
-                    allData = MOCK_DATA; // Fallback to mock
+                    allData = MOCK_DATA; 
                 }
                 renderState();
             } finally {
                 loader.classList.add('hidden');
+            }
+        };
+
+        const fetchHistory = async (onlyToday = false) => {
+            const mechanic = document.getElementById('employeeSelect').value;
+            if (onlyToday && !mechanic) {
+                customAlert("Оберіть своє ім'я у списку зверху, щоб побачити ваші записи!");
+                document.getElementById('employeeSelect').focus();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                return;
+            }
+
+            appState.filterHistoryToday = onlyToday;
+            const loader = document.getElementById('loadingState');
+            const loadText = document.getElementById('loadingText');
+            loadText.textContent = "Завантаження історії...";
+
+            document.getElementById('categoriesView').classList.add('hidden');
+            document.getElementById('itemsView').classList.add('hidden');
+            document.getElementById('historyView').classList.add('hidden');
+            loader.classList.remove('hidden');
+
+            try {
+                if (!navigator.onLine) throw new Error("Offline");
+                
+                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=getHistory");
+                const data = await response.json();
+                
+                if (data && data.success) {
+                    historyData = data.history;
+                } else {
+                    throw new Error("Помилка завантаження історії");
+                }
+            } catch (error) {
+                console.warn("Помилка або офлайн, показуємо порожній список", error);
+                historyData = [];
+            } finally {
+                loader.classList.add('hidden');
+                appState.view = 'history';
+                renderState();
+            }
+        };
+
+        const forceSendReport = async () => {
+            const pwd = await showPasswordDialog();
+            if (pwd === null) return; // Користувач натиснув "Скасувати"
+            
+            if (pwd !== '5588') {
+                customAlert("❌ Невірний пароль!");
+                return;
+            }
+
+            const confirm = await showCustomDialog("Сформувати та відправити актуальний план закупки запчастин на email головного інженера?", true);
+            if (!confirm) return;
+
+            const loader = document.getElementById('loadingState');
+            const loadText = document.getElementById('loadingText');
+            loadText.textContent = "Відправка плану...";
+            
+            document.getElementById('categoriesView').classList.add('hidden');
+            document.getElementById('itemsView').classList.add('hidden');
+            document.getElementById('historyView').classList.add('hidden');
+            loader.classList.remove('hidden');
+
+            try {
+                if (!navigator.onLine) {
+                    throw new Error("Offline");
+                }
+                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=forceReport");
+                const data = await response.json();
+                if (data && data.success) {
+                    customAlert("✅ План закупки успішно відправлено!");
+                }
+            } catch (error) {
+                customAlert("❌ Помилка відправки. Перевірте зв'язок з інтернетом.");
+            } finally {
+                loader.classList.add('hidden');
+                renderState();
             }
         };
 
@@ -460,15 +573,18 @@
             
             const catView = document.getElementById('categoriesView');
             const itemsViewEl = document.getElementById('itemsView');
+            const historyViewEl = document.getElementById('historyView');
             const titleEl = document.getElementById('currentCategoryTitle');
             const backBtnContainer = document.getElementById('backBtnContainer');
 
+            historyViewEl.classList.add('hidden');
+
             // Якщо є пошук, шукаємо по всіх категоріях
-            if (searchTerm) {
+            if (searchTerm && appState.view !== 'history') {
                 catView.classList.add('hidden');
                 itemsViewEl.classList.remove('hidden');
                 titleEl.textContent = 'Результати пошуку';
-                backBtnContainer.classList.add('hidden'); // Назад не працює при пошуку (кнопка "Х" в інпуті скине пошук)
+                backBtnContainer.classList.add('hidden'); 
                 
                 const allItems = allData.flatMap(c => c.items);
                 const filtered = allItems.filter(item => 
@@ -477,11 +593,20 @@
                     (item.no && String(item.no).toLowerCase().includes(searchTerm))
                 );
                 
-                renderItemsList(filtered, true); // true = показувати бейдж категорії
+                renderItemsList(filtered, true); 
                 return;
             }
 
-            // Звичайний режим
+            // Режим історії
+            if (appState.view === 'history') {
+                catView.classList.add('hidden');
+                itemsViewEl.classList.add('hidden');
+                historyViewEl.classList.remove('hidden');
+                renderHistoryList();
+                return;
+            }
+
+            // Звичайний режим (Категорії або список всередині)
             if (appState.view === 'categories') {
                 catView.classList.remove('hidden');
                 itemsViewEl.classList.add('hidden');
@@ -513,7 +638,7 @@
 
             allData.forEach(category => {
                 const btn = document.createElement('button');
-                btn.className = 'category-card p-5 rounded-2xl shadow-sm hover:shadow-md text-left flex flex-col justify-between group h-full border border-gray-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500';
+                btn.className = 'category-card p-5 rounded-2xl shadow-sm hover:shadow-md text-left flex flex-col justify-between group h-full border border-gray-200 focus:outline-none focus:ring-2 focus:ring-emerald-500';
                 btn.onclick = () => {
                     appState.view = 'items';
                     appState.activeCategory = category.name;
@@ -523,11 +648,11 @@
 
                 btn.innerHTML = `
                     <div class="flex justify-between items-start w-full">
-                        <span class="font-bold text-lg text-gray-800 dark:text-white leading-tight pr-2">${category.name}</span>
+                        <span class="font-bold text-lg text-gray-800 leading-tight pr-2">${category.name}</span>
                         <svg class="h-6 w-6 text-gray-400 group-hover:text-emerald-500 transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                     </div>
                     <div class="mt-4">
-                        <span class="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800 px-3 py-1 rounded-full text-sm font-semibold transition-colors shadow-sm inline-block">
+                        <span class="bg-emerald-50 text-emerald-700 border border-emerald-100 px-3 py-1 rounded-full text-sm font-semibold transition-colors shadow-sm inline-block">
                             ${category.items.length} позицій
                         </span>
                     </div>
@@ -555,23 +680,78 @@
                 card.innerHTML = `
                     <div>
                         <div class="flex items-start justify-between mb-1">
-                            <h3 class="font-bold text-lg leading-tight text-emerald-700 dark:text-emerald-400 pr-2">
-                                <span class="bg-gray-200 dark:bg-slate-700 text-gray-800 dark:text-gray-300 text-xs px-2 py-0.5 rounded mr-2 align-middle">№ ${item.no}</span>
+                            <h3 class="font-bold text-lg leading-tight text-emerald-700 pr-2">
+                                <span class="bg-gray-200 text-gray-800 text-xs px-2 py-0.5 rounded mr-2 align-middle">№ ${item.no}</span>
                                 <span class="align-middle">${item.model}</span>
                             </h3>
                         </div>
-                        ${showCategoryBadge ? `<p class="text-xs text-emerald-600 dark:text-emerald-400 mb-2 font-bold inline-block bg-emerald-50 dark:bg-emerald-900/40 px-2 py-0.5 rounded">${item.sheetName}</p>` : ''}
-                        <p class="text-sm text-muted mb-3 line-clamp-2 mt-1" title="${item.equipment}">
-                            <span class="font-medium">Обладнання:</span> ${item.equipment}
+                        ${showCategoryBadge ? `<p class="text-xs text-emerald-600 mb-2 font-bold inline-block bg-emerald-50 px-2 py-0.5 rounded">${item.sheetName}</p>` : ''}
+                        <p class="text-sm text-gray-600 mb-2 mt-1" title="${item.equipment}">
+                            <span class="font-medium text-gray-500">Обладнання:</span> ${item.equipment}
                         </p>
+                        ${(item.supplierName || item.supplierPhone) ? `
+                        <div class="text-xs text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-100 mb-2">
+                            <span class="font-bold">Постачальник:</span> ${item.supplierName || '—'} ${item.supplierPhone ? `<br>📞 ${item.supplierPhone}` : ''}
+                        </div>` : ''}
                     </div>
-                    <div class="flex justify-between items-end mt-auto pt-2 border-t border-gray-200 dark:border-slate-600 border-opacity-50">
-                        <div class="text-xs text-muted">
-                            Мін. запас: <span class="font-semibold text-gray-700 dark:text-gray-300">${item.minStock}</span>
+                    <div class="flex justify-between items-end mt-auto pt-2 border-t border-gray-200 border-opacity-50">
+                        <div class="text-xs text-gray-500">
+                            Мін. запас: <span class="font-semibold text-gray-700">${item.minStock}</span>
                         </div>
                         <div class="text-sm text-right">
-                            Залишок: <span class="font-bold text-lg ${isLowStock ? 'text-red-500' : 'text-gray-900 dark:text-white'}">${item.currentStock}</span>
+                            Залишок: <span class="font-bold text-lg ${isLowStock ? 'text-red-600' : 'text-gray-900'}">${item.currentStock}</span>
                         </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        };
+
+        const renderHistoryList = () => {
+            const container = document.getElementById('historyContainer');
+            const titleEl = document.getElementById('historyTitle');
+            container.innerHTML = '';
+
+            let filteredHistory = historyData;
+
+            if (appState.filterHistoryToday) {
+                titleEl.textContent = "Мої списання за сьогодні";
+                const mechanic = document.getElementById('employeeSelect').value;
+                const todayStr = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+                
+                filteredHistory = historyData.filter(record => {
+                    // Перевіряємо чи дата співпадає з сьогоднішньою (залежить від формату дати в GAS, але GAS має віддавати "YYYY-MM-DD" щоб було легко)
+                    // Тому в GAS ми зберігаємо `payload.date`, яка приходить як `YYYY-MM-DD` від інпута `type="date"`
+                    return record.mechanic === mechanic && record.date.includes(todayStr);
+                });
+            } else {
+                titleEl.textContent = "Історія рухів";
+            }
+
+            if (filteredHistory.length === 0) {
+                container.innerHTML = `<div class="text-center w-full text-muted py-8 card rounded-xl border border-gray-200">${appState.filterHistoryToday ? 'Ви сьогодні ще нічого не списували' : 'Історія порожня або немає зв\'язку'}</div>`;
+                return;
+            }
+
+            filteredHistory.forEach(record => {
+                const card = document.createElement('div');
+                card.className = 'card p-4 rounded-xl shadow-sm border border-gray-200';
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <span class="text-xs font-bold text-gray-500">${record.date} ${record.time || ''}</span>
+                            <h4 class="font-bold text-gray-900 mt-1">${record.model}</h4>
+                        </div>
+                        <span class="bg-red-100 text-red-700 font-bold px-2 py-1 rounded text-sm whitespace-nowrap">- ${record.quantity} шт</span>
+                    </div>
+                    <div class="text-sm text-gray-600 mb-1">
+                        <span class="font-medium text-gray-500">Хто:</span> ${record.mechanic}
+                    </div>
+                    <div class="text-sm text-gray-600 mb-1">
+                        <span class="font-medium text-gray-500">Де:</span> ${record.location}
+                    </div>
+                    <div class="text-xs text-indigo-600 font-medium mt-2">
+                        Категорія: ${record.sheetName}
                     </div>
                 `;
                 container.appendChild(card);
@@ -591,7 +771,7 @@
         clearBtn.addEventListener('click', () => {
             searchInput.value = '';
             clearBtn.classList.add('hidden');
-            renderState(); // Поверне до попереднього екрану (категорій або відкритої категорії)
+            renderState(); 
         });
 
         document.getElementById('backToCategoriesBtn').addEventListener('click', () => {
@@ -650,7 +830,7 @@
             const mechanic = document.getElementById('employeeSelect').value;
             const quantity = parseFloat(document.getElementById('useQuantity').value);
             const location = document.getElementById('useLocation').value.trim();
-            const date = document.getElementById('useDate').value;
+            const date = document.getElementById('useDate').value; // Формат "YYYY-MM-DD"
 
             if (!quantity || quantity <= 0) { customAlert("Введіть коректну кількість!"); return; }
             if (!location) { customAlert("Вкажіть, де була використана деталь!"); return; }
@@ -663,13 +843,13 @@
 
             const payload = {
                 action: "registerUsage",
-                sheetName: currentSelectedItem.sheetName, // ВАЖЛИВО! Передаємо назву аркуша
+                sheetName: currentSelectedItem.sheetName,
                 row: currentSelectedItem.row,
                 model: currentSelectedItem.model,
                 mechanic: mechanic,
                 quantity: quantity,
                 location: location,
-                date: date,
+                date: date, 
                 timestamp: new Date().toISOString()
             };
 
@@ -701,11 +881,8 @@
         });
 
         const showSuccessAndClose = (isOffline = false) => {
-            // Оновлюємо локальні дані, щоб одразу бачити зміни
             if (currentSelectedItem) {
                 const qty = parseFloat(document.getElementById('useQuantity').value);
-                
-                // Знаходимо категорію та елемент в ній
                 const categoryData = allData.find(c => c.name === currentSelectedItem.sheetName);
                 if (categoryData) {
                     const itemInArray = categoryData.items.find(i => i.row === currentSelectedItem.row);
