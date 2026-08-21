@@ -5,12 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Облік ЗІП: Механік</title>
     
-    <link rel="manifest" id="manifest-link">
-    <meta name="theme-color" content="#f8fafc">
+    <meta name="description" content="Журнал використання запчастин: списання ЗІП, залишки, історія рухів та план закупки. Працює офлайн.">
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#10b981">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Облік ЗІП">
-    <link rel="apple-touch-icon" href="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp">
+    <meta name="apple-mobile-web-app-title" content="ЗІП Механік">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root {
@@ -98,19 +103,6 @@
     </style>
 </head>
 <body class="font-sans">
-
-    <script>
-        const manifest = {
-            "name": "Облік ЗІП",
-            "short_name": "ЗІП Механік",
-            "description": "Додаток для реєстрації використання запчастин",
-            "start_url": ".",
-            "display": "standalone",
-            "background_color": "#f8fafc",
-            "theme_color": "#10b981"
-        };
-        document.getElementById('manifest-link').href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
-    </script>
 
     <div class="container mx-auto max-w-3xl p-4 sm:p-6 relative">
         <header class="relative text-center mb-6">
@@ -910,9 +902,38 @@
             }
         };
 
+        // --- Ярлики з маніфесту (?view=...) ---
+        const applyManifestShortcut = () => {
+            const view = new URLSearchParams(window.location.search).get('view');
+            if (!view) return;
+
+            // Прибираємо параметр з адреси, щоб він не спрацював повторно
+            history.replaceState(null, '', window.location.pathname);
+
+            if (view === 'history-today') {
+                fetchHistory(true);
+            } else if (view === 'history') {
+                fetchHistory(false);
+            } else if (view === 'search') {
+                document.getElementById('searchInput').focus();
+            }
+        };
+
+        // --- Service worker (встановлення на телефон + робота офлайн) ---
+        const registerServiceWorker = () => {
+            // Працює лише у безпечному контексті (https або localhost)
+            if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch((err) => {
+                    console.warn('Service worker не зареєстровано:', err);
+                });
+            });
+        };
+
         // --- Ініціалізація ---
         document.addEventListener('DOMContentLoaded', () => {
             updateNetworkStatus();
+            registerServiceWorker();
             
             const savedMechanic = localStorage.getItem('selectedMechanic');
             if(savedMechanic) document.getElementById('employeeSelect').value = savedMechanic;
@@ -924,7 +945,8 @@
             window.addEventListener('offline', updateNetworkStatus);
             document.getElementById('networkStatusBtn').addEventListener('click', processOfflineQueue);
 
-            fetchData();
+            // Ярлик з маніфесту застосовуємо після завантаження бази
+            fetchData().then(applyManifestShortcut);
         });
     </script>
 </body>
