@@ -225,9 +225,14 @@
                     </button>
                 </div>
 
-                <div class="bg-gray-100 p-3 rounded-lg flex justify-between items-center mb-6 border border-gray-200">
+                <div class="bg-gray-100 p-3 rounded-lg flex justify-between items-center mb-3 border border-gray-200">
                     <span class="font-medium text-sm text-gray-700">Поточний залишок:</span>
                     <span class="font-bold text-lg text-gray-900" id="modalCurrentStock">18 шт</span>
+                </div>
+
+                <div class="flex justify-between items-center mb-6 px-1">
+                    <span class="text-sm text-gray-700">📍 Місце: <span class="font-bold text-gray-900" id="modalStorage">не вказано</span></span>
+                    <button id="editStorageBtn" class="hidden text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1 hover:bg-emerald-100 transition-colors">Змінити</button>
                 </div>
 
                 <div class="space-y-4">
@@ -476,6 +481,46 @@
             localStorage.removeItem(SESSION_KEY);
         };
 
+        // --- Автовихід через 10 хвилин бездіяльності ---
+        const IDLE_LIMIT_MS = 10 * 60 * 1000;
+        const ACTIVITY_KEY = 'zipLastActivityV1';
+        let idleTimer = null;
+        let lastActivityWrite = 0;
+
+        const autoLogout = () => {
+            if (!session) return;
+            clearSession();
+            applyPermissions();
+            closeUsageModal();
+            showLogin('Сесію завершено через 10 хвилин бездіяльності. Увійдіть за PIN.');
+        };
+
+        const markActivity = () => {
+            if (!session) return;
+            const now = Date.now();
+            if (now - lastActivityWrite > 5000) {
+                localStorage.setItem(ACTIVITY_KEY, String(now));
+                lastActivityWrite = now;
+            }
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(autoLogout, IDLE_LIMIT_MS);
+        };
+
+        // Сторінку могли просто закрити: перевіряємо простій і після перезавантаження
+        const isIdleExpired = () => {
+            const last = Number(localStorage.getItem(ACTIVITY_KEY) || 0);
+            return !!last && Date.now() - last > IDLE_LIMIT_MS;
+        };
+
+        const startIdleWatch = () => {
+            ['click', 'keydown', 'touchstart', 'scroll'].forEach(type =>
+                document.addEventListener(type, markActivity, { passive: true }));
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && session && isIdleExpired()) autoLogout();
+            });
+            markActivity();
+        };
+
         const can = (action) => !!session && (session.permissions || []).indexOf(action) !== -1;
 
         // Content-Type: text/plain — «простий» запит, тому браузер не робить preflight,
@@ -540,6 +585,7 @@
                     input.value = '';
                     hideLogin();
                     applyPermissions();
+                    startIdleWatch();
                     fetchData();
                 } else {
                     showLogin((data && data.error) || 'Невірний PIN');
@@ -772,9 +818,10 @@
                 backBtnContainer.classList.add('hidden'); 
                 
                 const allItems = allData.flatMap(c => c.items);
-                const filtered = allItems.filter(item => 
-                    (item.model && item.model.toLowerCase().includes(searchTerm)) || 
+                const filtered = allItems.filter(item =>
+                    (item.model && item.model.toLowerCase().includes(searchTerm)) ||
                     (item.equipment && item.equipment.toLowerCase().includes(searchTerm)) ||
+                    (item.storage && item.storage.toLowerCase().includes(searchTerm)) ||
                     (item.no && String(item.no).toLowerCase().includes(searchTerm))
                 );
                 
@@ -875,6 +922,7 @@
                         <p class="text-sm text-gray-600 mb-2 mt-1" title="${item.equipment}">
                             <span class="font-medium text-gray-500">Обладнання:</span> ${item.equipment}
                         </p>
+                        ${item.storage ? `<p class="text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 inline-block px-2 py-0.5 rounded mb-2">📍 ${item.storage}</p>` : ''}
                         ${(item.supplierName || item.supplierPhone) ? `
                         <div class="text-xs text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-100 mb-2">
                             <span class="font-bold">Постачальник:</span> ${item.supplierName || '—'} ${item.supplierPhone ? `<br>📞 ${item.supplierPhone}` : ''}
@@ -1072,6 +1120,8 @@
             document.getElementById('modalPartName').textContent = item.model;
             document.getElementById('modalPartEquipment').textContent = item.equipment;
             document.getElementById('modalCurrentStock').textContent = item.hasStock === false ? 'не інвентаризовано' : `${item.currentStock} шт`;
+            document.getElementById('modalStorage').textContent = item.storage || 'не вказано';
+            document.getElementById('editStorageBtn').classList.toggle('hidden', !can('manageStorage'));
             
             document.getElementById('useQuantity').value = 1;
             document.getElementById('useLocation').value = item.equipment; // Дефолт
@@ -1096,6 +1146,42 @@
                 currentSelectedItem = null;
             }, 300);
         };
+
+        // --- Адресне зберігання ---
+        document.getElementById('editStorageBtn').addEventListener('click', async () => {
+            if (!currentSelectedItem || !can('manageStorage')) return;
+
+            const value = await showPromptDialog(
+                `Місце зберігання для «${currentSelectedItem.model}»:<br><span class="text-sm text-gray-500">Наприклад: Контейнер 1, стелаж B, полиця 3</span>`,
+                currentSelectedItem.storage || 'Стелаж / полиця / комірка');
+            if (value === null) return;
+
+            try {
+                const result = await apiPost({
+                    action: 'setStorage',
+                    sheetName: currentSelectedItem.sheetName,
+                    row: currentSelectedItem.row,
+                    model: currentSelectedItem.model,
+                    storage: value,
+                    token: session.token, deviceId: getDeviceId()
+                });
+                if (result && result.success) {
+                    currentSelectedItem.storage = result.storage;
+                    document.getElementById('modalStorage').textContent = result.storage || 'не вказано';
+                    const category = allData.find(c => c.name === currentSelectedItem.sheetName);
+                    const item = category && category.items.find(i => i.row === currentSelectedItem.row);
+                    if (item) item.storage = result.storage;
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
+                    renderState();
+                } else if (result && result.code === 'AUTH') {
+                    handleAuthFailure();
+                } else {
+                    customAlert('❌ ' + ((result && result.error) || 'Не вдалося зберегти місце'));
+                }
+            } catch (e) {
+                customAlert('❌ Немає зв’язку — місце зберігання змінюється лише онлайн.');
+            }
+        });
 
         document.getElementById('closeUsageModalBtn').addEventListener('click', closeUsageModal);
         modal.addEventListener('click', (e) => { if (e.target === modal) closeUsageModal(); });
@@ -1186,11 +1272,15 @@
                     closeUsageModal();
                     handleAuthFailure();
                 } else if (result.code === 'NOT_COUNTED') {
-                    const go = await showCustomDialog(result.error + '\n\nПровести інвентаризацію зараз?', true);
-                    if (go && can('registerInventory')) {
-                        setOperation('registerInventory');
-                        document.getElementById('useQuantity').value = 0;
-                        document.getElementById('useQuantity').focus();
+                    if (!can('registerInventory')) {
+                        customAlert(result.error + '\n\nІнвентаризацію проводить zip.admin або admin.');
+                    } else {
+                        const go = await showCustomDialog(result.error + '\n\nПровести інвентаризацію зараз?', true);
+                        if (go) {
+                            setOperation('registerInventory');
+                            document.getElementById('useQuantity').value = 0;
+                            document.getElementById('useQuantity').focus();
+                        }
                     }
                 } else {
                     customAlert('❌ ' + (result.error || 'Сервер відхилив запис'));
@@ -1242,7 +1332,13 @@
                 }, 2000);
             }
 
-            if (result && result.warning) setTimeout(() => customAlert('⚠️ ' + result.warning), 400);
+            const gap = result && result.discrepancy;
+            if (gap && gap.delta !== null && gap.delta !== 0) {
+                setTimeout(() => customAlert(
+                    `Зафіксовано розбіжність:\nобліковий залишок ${gap.accounted}, фактичний ${gap.fact} (${gap.delta > 0 ? '+' : ''}${gap.delta}).\n\nЗапис додано в журнал, попередні операції збережено.`), 400);
+            } else if (result && result.warning) {
+                setTimeout(() => customAlert('⚠️ ' + result.warning), 400);
+            }
         };
 
         // --- Ярлики з маніфесту (?view=...) ---
@@ -1299,7 +1395,12 @@
             window.addEventListener('offline', updateNetworkStatus);
             document.getElementById('networkStatusBtn').addEventListener('click', processOfflineQueue);
 
-            if (session) {
+            if (session && isIdleExpired()) {
+                clearSession();
+                applyPermissions();
+                showLogin('Сесію завершено через 10 хвилин бездіяльності. Увійдіть за PIN.');
+            } else if (session) {
+                startIdleWatch();
                 // Ярлик з маніфесту застосовуємо після завантаження бази
                 fetchData().then(applyManifestShortcut);
             } else {

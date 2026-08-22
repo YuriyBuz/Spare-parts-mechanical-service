@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-22-usage';
+const CODE_VERSION = 'zip-2026-08-22-storage';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -51,9 +51,11 @@ const ATTEMPT_WINDOW_SECONDS = 300;
  * і сервер (перед кожним записом), і клієнт (щоб ховати недоступні кнопки).
  */
 const ROLE_PERMISSIONS = {
-  'zip.use':   ['registerUsage', 'registerInventory', 'cancelOwn'],
-  'zip.admin': ['registerUsage', 'registerInventory', 'registerRestock', 'forceReport', 'cancelOwn', 'cancelAny'],
-  'admin':     ['registerUsage', 'registerInventory', 'registerRestock', 'forceReport', 'cancelOwn', 'cancelAny']
+  'zip.use':   ['registerUsage', 'cancelOwn'],
+  'zip.admin': ['registerUsage', 'registerRestock', 'registerInventory', 'forceReport',
+                'cancelOwn', 'cancelAny', 'manageStorage'],
+  'admin':     ['registerUsage', 'registerRestock', 'registerInventory', 'forceReport',
+                'cancelOwn', 'cancelAny', 'manageStorage']
 };
 
 // ==========================================
@@ -294,7 +296,9 @@ const FALLBACK_EMAILS = 'Buznitskiy7@gmail.com, dyndarnastia@gmail.com';
 // false — стара поведінка: порожньо = 0 і позиція завжди в плані.
 const SKIP_UNCOUNTED_POSITIONS = true;
 
-const CAT_WIDTH = 14;   // A..N
+const CAT_WIDTH = 15;   // A..N + O «Місце зберігання»
+const STORAGE_COL = 15; // O
+const STORAGE_HEADER = 'Місце зберігання';
 const LOG_WIDTH = 11;   // A..K
 const FIRST_DATA_ROW = 4;
 
@@ -367,7 +371,8 @@ function doGet(e) {
             currentStock: toNumber(row[4]),
             hasStock: String(row[4]).trim() !== '',   // порожньо ≠ нуль
             supplierName: String(row[12] || ''),
-            supplierPhone: String(row[13] || '')
+            supplierPhone: String(row[13] || ''),
+            storage: String(row[14] || '').trim()
           });
         });
         if (items.length) categories.push({ name: sheet.getName(), items: items });
@@ -452,6 +457,9 @@ function doPost(e) {
     if (payload.action === 'cancelOperation') {
       return json(cancelOperation_(payload));
     }
+    if (payload.action === 'setStorage') {
+      return json(setStorage_(payload));
+    }
     return json(registerOperation_(payload));
 
   } catch (error) {
@@ -494,6 +502,25 @@ function registerOperation_(payload) {
 
     const stock = readStock_(sheet, payload.row);
     let location = String(payload.location || '').trim() || '-';
+    let discrepancy = null;
+
+    if (payload.action === 'registerInventory') {
+      // Фіксуємо фактичний залишок і те, наскільки він розійшовся з обліковим.
+      // Історія не затирається: попередні рядки лишаються, додається новий.
+      const accounted = stock.counted
+        ? computeStockFromLog_(log, payload.sheetName, payload.model, stock.value)
+        : null;
+      discrepancy = {
+        accounted: accounted,
+        fact: quantity,
+        delta: accounted === null ? null : Math.round((quantity - accounted) * 1000) / 1000
+      };
+      const note = accounted === null
+        ? 'Інвентаризація: облік — (не рахували), факт ' + quantity
+        : 'Інвентаризація: облік ' + accounted + ', факт ' + quantity +
+          ' (' + (discrepancy.delta > 0 ? '+' : '') + discrepancy.delta + ')';
+      location = location === '-' ? note : location + ' · ' + note;
+    }
 
     if (payload.action === 'registerUsage') {
       if (!stock.counted) {
@@ -538,7 +565,7 @@ function registerOperation_(payload) {
     }
 
     return {
-      success: true, newStock: newVal, actor: actor,
+      success: true, newStock: newVal, actor: actor, discrepancy: discrepancy,
       warning: newVal < 0 ? 'Залишок від\'ємний — проведіть інвентаризацію цієї позиції.' : ''
     };
   } finally {
@@ -621,6 +648,69 @@ function cancelOperation_(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Адресне зберігання: змінює місце позиції (колонка O) і лишає слід у журналі.
+ * Кількість у такому рядку — 0, тож на залишок і на витрату він не впливає.
+ */
+function setStorage_(payload) {
+  const session = requirePermission_(payload, 'manageStorage');
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(payload.sheetName);
+  if (!sheet) throw new Error('Аркуш не знайдено: ' + payload.sheetName);
+
+  const storage = String(payload.storage || '').trim();
+  if (storage.length > 60) throw new Error('Задовга адреса зберігання');
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
+  try {
+    ensureStorageColumn_(sheet);
+    const cell = sheet.getRange(payload.row, STORAGE_COL);
+    const previous = String(cell.getDisplayValue()).trim();
+    if (previous === storage) return { success: true, storage: storage, unchanged: true };
+
+    cell.setValue(storage);
+
+    const now = new Date();
+    setupLogSheet().appendRow([
+      now.toISOString(), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      payload.sheetName, sheet.getRange(payload.row, 1).getValue(), payload.model,
+      'Зміна місця', session.name,
+      'Місце: ' + (previous || '—') + ' → ' + (storage || '—'), '-', 0, session.name
+    ]);
+
+    return { success: true, storage: storage, previous: previous, actor: session.name };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Створює колонку O із заголовком, якщо її ще немає. */
+function ensureStorageColumn_(sheet) {
+  if (sheet.getMaxColumns() < STORAGE_COL) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), STORAGE_COL - sheet.getMaxColumns());
+  }
+  if (String(sheet.getRange(3, STORAGE_COL).getDisplayValue()).trim() === STORAGE_HEADER) return;
+
+  sheet.getRange(2, STORAGE_COL).setValue(STORAGE_HEADER);
+  sheet.getRange(3, STORAGE_COL).setValue(STORAGE_HEADER);
+  sheet.getRange(2, STORAGE_COL, 2, 1).merge()
+    .setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+  sheet.setColumnWidth(STORAGE_COL, 150);
+}
+
+/** Одноразово додає колонку «Місце зберігання» на всі аркуші-каталоги. */
+function setupStorageColumn() {
+  const touched = [];
+  forEachCatalogSheet(function (sheet) {
+    ensureStorageColumn_(sheet);
+    touched.push(sheet.getName());
+  });
+  const report = 'Колонку «' + STORAGE_HEADER + '» перевірено на аркушах: ' + touched.join(', ');
+  console.log(report);
+  return report;
 }
 
 // ==========================================
@@ -873,8 +963,14 @@ function forEachCatalogSheet(callback) {
   });
 }
 
+/** Читає рядки позицій, доповнюючи їх до CAT_WIDTH, якщо колонки O ще немає. */
 function readCatalog(sheet) {
-  return sheet.getRange(FIRST_DATA_ROW, 1, sheet.getLastRow() - FIRST_DATA_ROW + 1, CAT_WIDTH).getValues();
+  const width = Math.min(CAT_WIDTH, sheet.getMaxColumns());
+  const values = sheet.getRange(FIRST_DATA_ROW, 1, sheet.getLastRow() - FIRST_DATA_ROW + 1, width).getValues();
+  return values.map(function (row) {
+    while (row.length < CAT_WIDTH) row.push('');
+    return row;
+  });
 }
 
 function toNumber(value) {
