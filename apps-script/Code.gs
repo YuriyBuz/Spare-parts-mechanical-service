@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-22-report';
+const CODE_VERSION = 'zip-2026-08-22-recipients';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -38,7 +38,7 @@ const EMPLOYEES_SHEET_NAME = '_REF_Employees';
 const POSITIONS_SHEET_NAME = '_REF_Positions';
 
 // Індекси колонок (0-based) в «_REF_Employees»
-const EMP = { id: 0, fullName: 1, shortName: 2, posId: 4, status: 7, pin: 16, extraRoles: 17, finalRoles: 18 };
+const EMP = { id: 0, fullName: 1, shortName: 2, posId: 4, status: 7, email: 14, pin: 16, extraRoles: 17, finalRoles: 18 };
 const EMP_WIDTH = 19;                 // A..S
 const POS = { id: 0, roles: 3 };      // A..D
 
@@ -209,6 +209,7 @@ function readEmployees_() {
         name: String(row[EMP.fullName]).trim(),
         shortName: String(row[EMP.shortName] || row[EMP.fullName]).trim(),
         status: String(row[EMP.status]).trim().toLowerCase(),
+        email: String(row[EMP.email]).trim(),
         pin: String(row[EMP.pin]).trim(),
         roles: roles,
         permissions: permissions,
@@ -255,6 +256,37 @@ function permissionsFor_(roles) {
     (ROLE_PERMISSIONS[role] || []).forEach(function (permission) { allowed[permission] = true; });
   });
   return Object.keys(allowed);
+}
+
+/**
+ * Друкує, кому піде звіт і чому. Запускати з редактора Apps Script.
+ */
+function auditRecipients() {
+  const recipients = reportRecipients_();
+  const lines = recipients.length
+    ? ['Звіт отримають ' + recipients.length + ' співробітників (з колонки O «_REF_Employees»):']
+    : ['У довіднику немає жодного співробітника з правом на звіт і заповненим email.'];
+
+  recipients.forEach(function (person) {
+    lines.push('  ' + person.name + ' [' + person.roles.join(', ') + '] → ' + person.email);
+  });
+
+  // Хто має право на звіт, але без email — найчастіша причина «мені не приходить»
+  const missing = readEmployees_().filter(function (employee) {
+    return employee.eligible && employee.permissions.indexOf('forceReport') !== -1 &&
+      employee.email.indexOf('@') === -1;
+  });
+  missing.forEach(function (person) {
+    lines.push('  ⚠ ' + person.name + ' [' + person.roles.join(', ') + '] — право є, email у колонці O порожній');
+  });
+
+  if (!recipients.length) {
+    lines.push('Поки що листи йдуть на запасний список: ' + FALLBACK_EMAILS);
+  }
+
+  const report = lines.join('\n');
+  console.log(report);
+  return report;
 }
 
 // ==========================================
@@ -1151,9 +1183,32 @@ function readPeople() {
   return people;
 }
 
+/**
+ * Кому йде звіт. Основне джерело — колонка O «email» довідника
+ * «_REF_Employees»: беруться активні співробітники, чия роль дозволяє звіт
+ * (zip.admin, admin). Дав людині роль — вона почала отримувати листи.
+ */
 function getNotificationEmails() {
-  const emails = readPeople().emails;
-  return emails.length ? emails.join(',') : FALLBACK_EMAILS;
+  const fromDirectory = reportRecipients_().map(function (person) { return person.email; });
+  if (fromDirectory.length) return fromDirectory.join(',');
+
+  const fromSheet = readPeople().emails;          // запасний варіант: аркуш «Користувачі»
+  if (fromSheet.length) return fromSheet.join(',');
+
+  return FALLBACK_EMAILS;
+}
+
+function reportRecipients_() {
+  const seen = {};
+  return readEmployees_().filter(function (employee) {
+    if (!employee.eligible) return false;
+    if (employee.permissions.indexOf('forceReport') === -1) return false;
+    if (employee.email.indexOf('@') === -1) return false;
+    const key = employee.email.toLowerCase();
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
 }
 
 function setupLogSheet() {
