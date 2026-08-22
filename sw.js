@@ -2,7 +2,7 @@
    Потрібен, щоб застосунок можна було встановити на телефон
    і щоб він відкривався без інтернету (дані беруться з localStorage). */
 
-const CACHE = 'zip-mechanic-v1';
+const CACHE = 'zip-mechanic-v2';
 
 // Файли самого застосунку — кешуються під час встановлення.
 const APP_SHELL = [
@@ -19,6 +19,14 @@ const APP_SHELL = [
 
 // Запити до Google Apps Script ніколи не кешуємо — це живі дані.
 const isApiRequest = (url) => url.hostname.endsWith('script.google.com');
+
+// На виробництві Wi-Fi буває «є, але не працює»: запит не падає, а висить.
+// Тому чекаємо мережу лише 3 секунди, далі відкриваємо збережену сторінку.
+const NAVIGATION_TIMEOUT_MS = 3000;
+const withTimeout = (promise, ms) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+]);
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
@@ -52,7 +60,7 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        const fresh = await fetch(request);
+        const fresh = await withTimeout(fetch(request), NAVIGATION_TIMEOUT_MS);
         const cache = await caches.open(CACHE);
         cache.put('./index.html', fresh.clone());
         return fresh;

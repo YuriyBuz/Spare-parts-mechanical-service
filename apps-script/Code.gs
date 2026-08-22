@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-22-recipients';
+const CODE_VERSION = 'zip-2026-08-22-offline';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -538,7 +538,8 @@ function registerOperation_(payload) {
     const log = readLog_();
 
     // Той самий запис міг прийти вдруге з офлайн-черги — повторно не застосовуємо
-    const duplicate = findLogEntry_(log, payload.timestamp);
+    const duplicate = findLogEntry_(log, payload.timestamp,
+      { sheetName: payload.sheetName, model: payload.model, actor: session.name });
     if (duplicate) {
       return { success: true, duplicate: true, actor: session.name,
                newStock: readStock_(sheet, payload.row).value };
@@ -636,7 +637,9 @@ function cancelOperation_(payload) {
   if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
   try {
     const log = readLog_();
-    const entry = findLogEntry_(log, payload.timestamp);
+    // Клієнт передає ще й позицію — щоб не скасувати чужу операцію з тим самим часом
+    const entry = findLogEntry_(log, payload.timestamp,
+      { sheetName: payload.sheetName, model: payload.model });
     if (!entry) throw authError_('NOT_FOUND', 'Операцію не знайдено в журналі.');
 
     const label = String(entry.values[5]).trim();
@@ -777,11 +780,25 @@ function readLog_() {
   return { sheet: sheet, rows: rows };
 }
 
-function findLogEntry_(log, timestamp) {
+/**
+ * Шукає операцію в журналі. Самого часу мало: два пристрої теоретично можуть
+ * створити операції з однаковою мілісекундою, і тоді друга була б помилково
+ * визнана дублем. Тому за наявності match звіряємо ще позицію й автора.
+ */
+function findLogEntry_(log, timestamp, match) {
   const wanted = normalizeTimestamp_(timestamp);
   if (!wanted) return null;
+
   for (let i = log.rows.length - 1; i >= 0; i--) {
-    if (normalizeTimestamp_(log.rows[i].values[0]) === wanted) return log.rows[i];
+    const values = log.rows[i].values;
+    if (normalizeTimestamp_(values[0]) !== wanted) continue;
+    if (match) {
+      if (match.sheetName && String(values[2]).trim() !== String(match.sheetName).trim()) continue;
+      if (match.model && String(values[4]).trim() !== String(match.model).trim()) continue;
+      if (match.actor && String(values[10]).trim() !== String(match.actor).trim() &&
+                         String(values[6]).trim() !== String(match.actor).trim()) continue;
+    }
+    return log.rows[i];
   }
   return null;
 }
