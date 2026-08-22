@@ -125,12 +125,9 @@
 
         <!-- Вибір механіка -->
         <div class="mb-4 card p-4 rounded-xl shadow-sm border border-gray-200">
-            <label for="employeeSelect" class="block text-sm font-bold mb-2 text-gray-700">Механік (Хто взяв деталь?):</label>
+            <label for="employeeSelect" class="block text-sm font-bold mb-2 text-gray-700">Хто видав (ви):</label>
             <select id="employeeSelect" class="block w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-lg text-gray-800">
                 <option value="">-- Оберіть зі списку --</option>
-                <option value="Гора Андрій Олександрович">Гора Андрій</option>
-                <option value="Галагін Євгеній Ярославович">Галагін Евгеній</option>
-                <option value="Сабадаш Геннадій Петрович">Бузницький Юрій</option>
             </select>
         </div>
 
@@ -233,17 +230,36 @@
 
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-bold mb-1 text-gray-700">Кількість використано (шт):</label>
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Операція:</label>
+                        <div class="grid grid-cols-3 gap-2" id="operationSwitch">
+                            <button type="button" data-op="registerUsage" class="op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors">Видача</button>
+                            <button type="button" data-op="registerRestock" class="op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors">Поповнення</button>
+                            <button type="button" data-op="registerInventory" class="op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors">Інвентар.</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label id="qtyLabel" class="block text-sm font-bold mb-1 text-gray-700">Кількість використано (шт):</label>
                         <input type="number" id="useQuantity" min="1" value="1" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold text-lg text-center" inputmode="numeric">
                     </div>
-                    
+
+                    <div id="usedByWrap">
+                        <label for="usedBySelect" class="block text-sm font-bold mb-1 text-gray-700">Ким було використано:</label>
+                        <select id="usedBySelect" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base"></select>
+                    </div>
+
                     <div>
-                        <label class="block text-sm font-bold mb-1 text-gray-700">Де було використано:</label>
+                        <label id="locationLabel" class="block text-sm font-bold mb-1 text-gray-700">Де було використано:</label>
                         <input type="text" id="useLocation" placeholder="Наприклад: Лінія 1, мотор конвеєра" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
                     </div>
 
                     <div>
-                        <label class="block text-sm font-bold mb-1 text-gray-700">Дата використання:</label>
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Заводський № / партія (необов'язково):</label>
+                        <input type="text" id="useSerial" placeholder="—" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
+                    </div>
+
+                    <div>
+                        <label id="dateLabel" class="block text-sm font-bold mb-1 text-gray-700">Дата використання:</label>
                         <input type="date" id="useDate" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
                     </div>
                 </div>
@@ -251,7 +267,7 @@
                 <div class="mt-8 flex gap-3">
                     <button id="submitUsageBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 text-lg flex justify-center items-center">
                         <svg class="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Зареєструвати
+                        <span id="submitBtnText">Зареєструвати видачу</span>
                     </button>
                 </div>
             </div>
@@ -289,8 +305,13 @@
             filterHistoryToday: false
         };
         let currentSelectedItem = null;
+        let currentOperation = 'registerUsage';
+        let peopleLists = { controllers: [], employees: [] };
+        // Використовується, доки аркуш «Користувачі» в таблиці не заповнено
+        const FALLBACK_PEOPLE = ['Гора Андрій Олександрович', 'Галагін Євгеній Ярославович', 'Сабадаш Геннадій Петрович'];
         const OFFLINE_KEY = 'zipOfflineQueueV3';
         const CACHE_KEY = 'zipInventoryCacheV3';
+        const PEOPLE_KEY = 'zipPeopleV1';
 
         // --- Custom Dialog System ---
         const showCustomDialog = (message, isConfirm = false) => {
@@ -373,6 +394,23 @@
         };
 
         const customAlert = (msg) => showCustomDialog(msg, false);
+
+        // --- Списки людей (аркуш «Користувачі») ---
+        const fillSelect = (id, names, placeholder) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const previous = el.value || (id === 'employeeSelect' ? localStorage.getItem('selectedMechanic') : '') || '';
+            el.innerHTML = (placeholder ? `<option value="">${placeholder}</option>` : '') +
+                names.map(name => `<option value="${name}">${name}</option>`).join('');
+            if (previous && names.indexOf(previous) !== -1) el.value = previous;
+        };
+
+        const renderPeopleSelects = () => {
+            const controllers = peopleLists.controllers.length ? peopleLists.controllers : FALLBACK_PEOPLE;
+            const employees = peopleLists.employees.length ? peopleLists.employees : controllers;
+            fillSelect('employeeSelect', controllers, '-- Оберіть зі списку --');
+            fillSelect('usedBySelect', employees, null);
+        };
 
         // --- Мережа та Офлайн ---
         const updateNetworkStatus = () => {
@@ -461,7 +499,10 @@
                 
                 if (data && data.success) {
                     allData = data.categories;
+                    peopleLists = { controllers: data.controllers || [], employees: data.employees || [] };
                     localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
+                    localStorage.setItem(PEOPLE_KEY, JSON.stringify(peopleLists));
+                    renderPeopleSelects();
                     renderState();
                 } else {
                     throw new Error("Помилка формату даних");
@@ -662,7 +703,8 @@
             }
 
             items.forEach(item => {
-                const isLowStock = parseFloat(item.currentStock) <= parseFloat(item.minStock);
+                const notCounted = item.hasStock === false;
+                const isLowStock = !notCounted && parseFloat(item.currentStock) <= parseFloat(item.minStock);
                 
                 const card = document.createElement('div');
                 card.className = `inventory-item p-4 rounded-xl cursor-pointer flex flex-col justify-between ${isLowStock ? 'low-stock' : ''}`;
@@ -690,7 +732,8 @@
                             Мін. запас: <span class="font-semibold text-gray-700">${item.minStock}</span>
                         </div>
                         <div class="text-sm text-right">
-                            Залишок: <span class="font-bold text-lg ${isLowStock ? 'text-red-600' : 'text-gray-900'}">${item.currentStock}</span>
+                            Залишок: <span class="font-bold text-lg ${isLowStock ? 'text-red-600' : 'text-gray-900'}">${notCounted ? '—' : item.currentStock}</span>
+                            ${notCounted ? '<div class="text-xs text-amber-700 font-medium">не інвентаризовано</div>' : ''}
                         </div>
                     </div>
                 `;
@@ -713,7 +756,8 @@
                 filteredHistory = historyData.filter(record => {
                     // Перевіряємо чи дата співпадає з сьогоднішньою (залежить від формату дати в GAS, але GAS має віддавати "YYYY-MM-DD" щоб було легко)
                     // Тому в GAS ми зберігаємо `payload.date`, яка приходить як `YYYY-MM-DD` від інпута `type="date"`
-                    return record.mechanic === mechanic && record.date.includes(todayStr);
+                    const person = (record.usedBy && record.usedBy !== '-') ? record.usedBy : record.controller;
+                    return person === mechanic && String(record.date).includes(todayStr);
                 });
             } else {
                 titleEl.textContent = "Історія рухів";
@@ -733,10 +777,10 @@
                             <span class="text-xs font-bold text-gray-500">${record.date} ${record.time || ''}</span>
                             <h4 class="font-bold text-gray-900 mt-1">${record.model}</h4>
                         </div>
-                        <span class="bg-red-100 text-red-700 font-bold px-2 py-1 rounded text-sm whitespace-nowrap">- ${record.quantity} шт</span>
+                        <span class="${record.actionType === 'Поповнення' ? 'bg-emerald-100 text-emerald-700' : record.actionType === 'Інвентаризація' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'} font-bold px-2 py-1 rounded text-sm whitespace-nowrap">${record.actionType === 'Поповнення' ? '+' : record.actionType === 'Інвентаризація' ? '=' : '-'} ${record.quantity} шт</span>
                     </div>
                     <div class="text-sm text-gray-600 mb-1">
-                        <span class="font-medium text-gray-500">Хто:</span> ${record.mechanic}
+                        <span class="font-medium text-gray-500">Хто видав:</span> ${record.controller || '-'}${(record.usedBy && record.usedBy !== '-' && record.usedBy !== record.controller) ? ' → ' + record.usedBy : ''}
                     </div>
                     <div class="text-sm text-gray-600 mb-1">
                         <span class="font-medium text-gray-500">Де:</span> ${record.location}
@@ -775,6 +819,34 @@
         const modal = document.getElementById('usageModal');
         const modalContent = document.getElementById('usageModalContent');
 
+        const OPERATION_UI = {
+            registerUsage:     { qty: 'Кількість використано (шт):', loc: 'Де було використано:',  btn: 'Зареєструвати видачу',     usedBy: true,  toast: 'Успішно списано!' },
+            registerRestock:   { qty: 'Кількість надходження (шт):', loc: 'Примітка / накладна:',  btn: 'Зареєструвати поповнення', usedBy: false, toast: 'Поповнення записано!' },
+            registerInventory: { qty: 'Фактичний залишок (шт):',     loc: 'Примітка:',             btn: 'Зафіксувати залишок',      usedBy: false, toast: 'Залишок зафіксовано!' }
+        };
+
+        const setOperation = (operation) => {
+            currentOperation = operation;
+            const ui = OPERATION_UI[operation];
+            document.getElementById('qtyLabel').textContent = ui.qty;
+            document.getElementById('locationLabel').textContent = ui.loc;
+            document.getElementById('submitBtnText').textContent = ui.btn;
+            document.getElementById('usedByWrap').classList.toggle('hidden', !ui.usedBy);
+            document.getElementById('useQuantity').min = operation === 'registerInventory' ? 0 : 1;
+
+            document.querySelectorAll('#operationSwitch .op-btn').forEach(btn => {
+                const active = btn.dataset.op === operation;
+                btn.className = 'op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors ' +
+                    (active ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200');
+            });
+        };
+
+        document.getElementById('operationSwitch').addEventListener('click', (e) => {
+            const btn = e.target.closest('.op-btn');
+            if (btn) setOperation(btn.dataset.op);
+        });
+
         const openUsageModal = (item) => {
             const mechanic = document.getElementById('employeeSelect').value;
             if (!mechanic) {
@@ -790,11 +862,18 @@
             document.getElementById('modalPartCategory').textContent = item.sheetName;
             document.getElementById('modalPartName').textContent = item.model;
             document.getElementById('modalPartEquipment').textContent = item.equipment;
-            document.getElementById('modalCurrentStock').textContent = `${item.currentStock} шт`;
+            document.getElementById('modalCurrentStock').textContent = item.hasStock === false ? 'не інвентаризовано' : `${item.currentStock} шт`;
             
             document.getElementById('useQuantity').value = 1;
             document.getElementById('useLocation').value = item.equipment; // Дефолт
+            document.getElementById('useSerial').value = '';
             document.getElementById('useDate').value = new Date().toISOString().split('T')[0];
+
+            setOperation('registerUsage');
+            const usedBySelect = document.getElementById('usedBySelect');
+            if (Array.from(usedBySelect.options).some(option => option.value === mechanic)) {
+                usedBySelect.value = mechanic;
+            }
 
             modal.classList.remove('hidden');
             modal.classList.add('flex');
@@ -818,28 +897,35 @@
         document.getElementById('submitUsageBtn').addEventListener('click', async () => {
             if (!currentSelectedItem) return;
 
-            const mechanic = document.getElementById('employeeSelect').value;
+            const controller = document.getElementById('employeeSelect').value;
+            const usedBy = document.getElementById('usedBySelect').value || controller;
             const quantity = parseFloat(document.getElementById('useQuantity').value);
             const location = document.getElementById('useLocation').value.trim();
+            const serial = document.getElementById('useSerial').value.trim();
             const date = document.getElementById('useDate').value; // Формат "YYYY-MM-DD"
+            const isUsage = currentOperation === 'registerUsage';
 
-            if (!quantity || quantity <= 0) { customAlert("Введіть коректну кількість!"); return; }
-            if (!location) { customAlert("Вкажіть, де була використана деталь!"); return; }
+            if (!isFinite(quantity) || quantity < 0 || (quantity === 0 && currentOperation !== 'registerInventory')) {
+                customAlert("Введіть коректну кількість!"); return;
+            }
+            if (isUsage && !location) { customAlert("Вкажіть, де була використана деталь!"); return; }
 
             const currentStock = parseFloat(currentSelectedItem.currentStock);
-            if (quantity > currentStock) {
+            if (isUsage && quantity > currentStock) {
                 const confirmOver = await showCustomDialog(`Увага!\nВи списуєте ${quantity} шт, але в залишку лише ${currentStock} шт. Продовжити?`, true);
                 if (!confirmOver) return;
             }
 
             const payload = {
-                action: "registerUsage",
+                action: currentOperation,
                 sheetName: currentSelectedItem.sheetName,
                 row: currentSelectedItem.row,
                 model: currentSelectedItem.model,
-                mechanic: mechanic,
+                controller: controller,
+                usedBy: isUsage ? usedBy : '-',
                 quantity: quantity,
-                location: location,
+                location: location || '-',
+                serial: serial,
                 date: date, 
                 timestamp: new Date().toISOString()
             };
@@ -878,7 +964,12 @@
                 if (categoryData) {
                     const itemInArray = categoryData.items.find(i => i.row === currentSelectedItem.row);
                     if (itemInArray) {
-                        itemInArray.currentStock = (parseFloat(itemInArray.currentStock) - qty).toString();
+                        const before = parseFloat(itemInArray.currentStock) || 0;
+                        const after = currentOperation === 'registerUsage' ? before - qty
+                                    : currentOperation === 'registerRestock' ? before + qty
+                                    : qty;
+                        itemInArray.currentStock = after.toString();
+                        itemInArray.hasStock = true;
                     }
                 }
                 localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
@@ -892,7 +983,7 @@
             } else {
                 const toast = document.createElement('div');
                 toast.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg z-[3000] font-bold text-sm flex items-center transition-opacity duration-300';
-                toast.innerHTML = '<svg class="w-5 h-5 text-emerald-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Успішно списано!';
+                toast.innerHTML = '<svg class="w-5 h-5 text-emerald-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> ' + OPERATION_UI[currentOperation].toast;
                 document.body.appendChild(toast);
                 setTimeout(() => {
                     toast.style.opacity = '0';
@@ -934,8 +1025,8 @@
             updateNetworkStatus();
             registerServiceWorker();
             
-            const savedMechanic = localStorage.getItem('selectedMechanic');
-            if(savedMechanic) document.getElementById('employeeSelect').value = savedMechanic;
+            try { peopleLists = JSON.parse(localStorage.getItem(PEOPLE_KEY)) || peopleLists; } catch (e) { /* кеш зіпсовано — беремо запасний список */ }
+            renderPeopleSelects();
             document.getElementById('employeeSelect').addEventListener('change', (e) => {
                 localStorage.setItem('selectedMechanic', e.target.value);
             });
