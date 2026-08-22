@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-22-storage';
+const CODE_VERSION = 'zip-2026-08-22-report';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -297,6 +297,10 @@ const FALLBACK_EMAILS = 'Buznitskiy7@gmail.com, dyndarnastia@gmail.com';
 const SKIP_UNCOUNTED_POSITIONS = true;
 
 const CAT_WIDTH = 15;   // A..N + O «Місце зберігання»
+const EXCESS_FACTOR = 5;     // залишок у стільки разів вище мінімуму = надлишок
+const MOVEMENT_DAYS = 7;     // період блоку «Рух»
+// Основні засоби: у план закупки не потрапляють (верстати, насоси тощо)
+const ASSET_SHEET_PREFIXES = ['Інструменти', 'Контейнер та приміщення'];
 const STORAGE_COL = 15; // O
 const STORAGE_HEADER = 'Місце зберігання';
 const LOG_WIDTH = 11;   // A..K
@@ -318,7 +322,7 @@ const CANCEL_WINDOW_HOURS = 24;
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('⚙️ Меню ЗІП')
     .addItem('🧹 Очистити дані операцій (F–K)', 'clearUsageData')
-    .addItem('📧 Відправити план закупки зараз', 'manualSendReport')
+    .addItem('📧 Надіслати звіт зараз', 'manualSendReport')
     .addToUi();
 }
 
@@ -339,8 +343,14 @@ function clearUsageData() {
 }
 
 function manualSendReport() {
-  sendPurchasePlan(true);
-  SpreadsheetApp.getUi().alert('Готово', 'План закупки надіслано.', SpreadsheetApp.getUi().ButtonSet.OK);
+  const report = sendReport(true);
+  const message = report
+    ? 'Звіт надіслано.\n\nДо замовлення: ' + report.counts.deficit +
+      '\nПотребує інвентаризації: ' + report.counts.notCounted +
+      '\nВід\'ємний залишок: ' + report.counts.negative +
+      '\nНадлишок: ' + report.counts.excess
+    : 'Немає жодної адреси для розсилки: заповніть колонку C аркуша «Користувачі».';
+  SpreadsheetApp.getUi().alert('Готово', message, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 // ==========================================
@@ -433,8 +443,10 @@ function doGet(e) {
 
     if (action === 'forceReport') {
       requirePermission_(request, 'forceReport');
-      sendPurchasePlan(true);
-      return json({ success: true, message: 'План надіслано' });
+      const report = sendReport(true);
+      if (!report) return json({ success: false, code: 'NO_RECIPIENTS',
+        error: 'Немає адрес для розсилки: заповніть колонку C аркуша «Користувачі».' });
+      return json({ success: true, message: 'Звіт надіслано', counts: report.counts });
     }
 
     return json({ success: false, error: 'Unknown action' });
@@ -559,9 +571,17 @@ function registerOperation_(payload) {
       operation.label, formatDate(payload.date), operation.prefix + quantity, serial, location, actor
     ]);
 
-    const minStock = toNumber(sheet.getRange(payload.row, 4).getValue());
-    if ((payload.action === 'registerUsage' || payload.action === 'registerInventory') && newVal <= minStock) {
-      sendPurchasePlan(false);
+    // Сповіщення лише про перетин порогу — не лист після кожного списання
+    if (payload.action === 'registerUsage' || payload.action === 'registerInventory') {
+      const info = readItemRow_(sheet, payload.row);
+      maybeNotifyThreshold_({
+        sheetName: payload.sheetName, model: payload.model,
+        equipment: String(info[2] || '').trim() || '—',
+        minStock: toNumber(info[3]), stock: newVal,
+        supplier: String(info[12] || '').trim() || '—',
+        phone: String(info[13] || '').trim() || '—',
+        storage: String(info[14] || '').trim() || '—'
+      });
     }
 
     return {
@@ -829,85 +849,282 @@ function appendOperation(sheet, row, values) {
 // ==========================================
 // 3. ПЛАН ЗАКУПКИ
 // ==========================================
-function sendPurchasePlan(isManual) {
+function sendReport(isManual) {
   const targetEmails = getNotificationEmails();
-  if (!targetEmails) return;
+  if (!targetEmails) return null;
 
+  const report = buildReport_();
+  if (!report.counts.deficit && !report.counts.negative && !isManual) return report;
+
+  MailApp.sendEmail({ to: targetEmails, subject: report.subject, htmlBody: report.html });
+  return report;
+}
+
+/** Збирає всі блоки звіту: {subject, html, counts}. */
+function buildReport_() {
   const usage30 = collectUsage30();
-  let needsOrder = false;
-  let rows = '';
+  const sheetNames = {};
+  const deficit = [], notCounted = [], negative = [], excess = [];
 
-  forEachCatalogSheet((sheet) => {
-    const sheetName = sheet.getName();
-    readCatalog(sheet).forEach((row) => {
+  forEachCatalogSheet(function (sheet) {
+    const name = sheet.getName();
+    sheetNames[name] = true;
+    const asset = isAssetSheet_(name);
+
+    readCatalog(sheet).forEach(function (row) {
       if (!row[1] || String(row[1]).trim() === '') return;
-      const stockFilled = String(row[4]).trim() !== '';
-      if (SKIP_UNCOUNTED_POSITIONS && !stockFilled) return;   // не інвентаризовано — не вигадуємо дефіцит
+      const item = {
+        sheetName: name,
+        no: row[0] === '' ? '-' : row[0],
+        model: String(row[1]).trim(),
+        equipment: String(row[2] || '').trim() || '—',
+        minStock: toNumber(row[3]),
+        stock: toNumber(row[4]),
+        counted: String(row[4]).trim() !== '',
+        supplier: String(row[12] || '').trim() || '—',
+        phone: String(row[13] || '').trim() || '—',
+        storage: String(row[14] || '').trim() || '—'
+      };
 
-      const model = String(row[1]);
-      const minStock = toNumber(row[3]);
-      const currentStock = toNumber(row[4]);
-      if (currentStock > minStock) return;
+      if (!item.counted) { if (!asset) notCounted.push(item); return; }
+      if (item.stock < 0) negative.push(item);
+      if (asset) return;                                   // основні засоби не закуповуємо
 
-      needsOrder = true;
-      const used30 = usage30[sheetName + '_' + model] || 0;
-      const recommendBuy = Math.max(minStock - currentStock, used30);
-
-      rows += '<tr>' +
-        td(sheetName) + td('<strong>' + model + '</strong>') + td(row[2] || '-') +
-        td(minStock, 'center') +
-        td(currentStock, 'center', 'color:#b91c1c; font-weight:bold;') +
-        td(used30 + ' шт.', 'center') +
-        td(recommendBuy + ' шт.', 'center', 'color:#047857; font-weight:bold;') +
-        td(row[12] || '-') + td(row[13] || '-') +
-        '</tr>';
+      if (item.stock < item.minStock) {                    // строгий дефіцит
+        item.gap = item.minStock - item.stock;
+        item.used30 = usage30[name + '_' + item.model] || 0;
+        item.order = item.gap + item.used30;
+        deficit.push(item);
+      } else if (item.minStock > 0 && item.stock >= item.minStock * EXCESS_FACTOR) {
+        excess.push(item);
+      }
     });
   });
 
-  if (needsOrder) {
-    MailApp.sendEmail({
-      to: targetEmails,
-      subject: '🚨 УВАГА! План закупки ЗІП (Потрібне поповнення)',
-      htmlBody: buildReportHtml(rows)
-    });
-  } else if (isManual) {
-    MailApp.sendEmail({
-      to: targetEmails,
-      subject: '✅ ЗІП: План закупки пустий',
-      body: 'Усі запчастини в межах норми (більше мінімальних залишків). Закупівля не потрібна.'
-    });
-  }
+  // Групуємо закупівлю за постачальником: один дзвінок — один список
+  deficit.sort(function (a, b) {
+    if (a.supplier !== b.supplier) return a.supplier < b.supplier ? -1 : 1;
+    return b.order - a.order;
+  });
+  excess.sort(function (a, b) { return (b.stock / b.minStock) - (a.stock / a.minStock); });
+
+  const movement = collectMovement_(sheetNames, MOVEMENT_DAYS);
+  const counts = {
+    deficit: deficit.length,
+    orderTotal: round_(deficit.reduce(function (sum, item) { return sum + item.order; }, 0)),
+    notCounted: notCounted.length,
+    negative: negative.length,
+    excess: excess.length,
+    movement: movement.total
+  };
+
+  return {
+    counts: counts,
+    subject: counts.deficit
+      ? '🚨 ЗІП: до замовлення ' + counts.deficit + ' позицій (' + counts.orderTotal + ' од.) · ' + today_()
+      : '✅ ЗІП: дефіциту немає · ' + today_(),
+    html: renderReport_(deficit, notCounted, negative, excess, movement, counts)
+  };
 }
 
-/** Витрата за 30 днів — лише операції «Видача». */
+function renderReport_(deficit, notCounted, negative, excess, movement, counts) {
+  let html = "<div style='font-family: sans-serif; color:#1e293b;'>";
+  html += "<h2>Звіт по ЗІП · " + today_() + "</h2>";
+  html += "<p style='color:#475569;'>До замовлення: <b>" + counts.deficit +
+    "</b> · потребує інвентаризації: <b>" + counts.notCounted +
+    "</b> · від'ємний залишок: <b>" + counts.negative +
+    "</b> · надлишок: <b>" + counts.excess + "</b></p>";
+
+  if (deficit.length) {
+    let rows = '';
+    let supplier = null;
+    deficit.forEach(function (item) {
+      if (item.supplier !== supplier) {
+        supplier = item.supplier;
+        rows += "<tr style='background:#f8fafc;'><td colspan='10' style='padding:8px; font-weight:bold;'>" +
+          supplier + ' · ' + item.phone + '</td></tr>';
+      }
+      rows += '<tr>' + td(item.sheetName) + td(item.no, 'center') + td('<b>' + item.model + '</b>') +
+        td(item.equipment) + td(item.storage) + td(item.minStock, 'center') +
+        td(item.stock, 'center', 'color:#b91c1c; font-weight:bold;') + td(round_(item.gap), 'center') +
+        td(round_(item.used30), 'center') +
+        td('<b>' + round_(item.order) + '</b>', 'center', 'color:#047857;') + '</tr>';
+    });
+    html += section_('Потрібно замовити', ['Категорія', '№', 'Модель / Тип', 'Обладнання', '📍 Місце',
+      'Мін', 'Залишок', 'Дефіцит', 'Витрата 30 дн', 'Замовити'], rows);
+  }
+
+  if (notCounted.length) {
+    html += section_('Потребує інвентаризації', ['Категорія', '№', 'Модель / Тип', 'Мін', '📍 Місце'],
+      notCounted.map(function (item) {
+        return '<tr>' + td(item.sheetName) + td(item.no, 'center') + td(item.model) +
+          td(item.minStock, 'center') + td(item.storage) + '</tr>';
+      }).join(''));
+  }
+
+  if (negative.length) {
+    html += section_("Від'ємний залишок — облік розійшовся з полицею",
+      ['Категорія', '№', 'Модель / Тип', 'Залишок', '📍 Місце'],
+      negative.map(function (item) {
+        return '<tr>' + td(item.sheetName) + td(item.no, 'center') + td(item.model) +
+          td(item.stock, 'center', 'color:#b91c1c; font-weight:bold;') + td(item.storage) + '</tr>';
+      }).join(''));
+  }
+
+  if (excess.length) {
+    html += section_('Надлишок (залишок ≥ ' + EXCESS_FACTOR + '× мінімуму)',
+      ['Категорія', 'Модель / Тип', 'Мін', 'Залишок', 'Кратність'],
+      excess.map(function (item) {
+        return '<tr>' + td(item.sheetName) + td(item.model) + td(item.minStock, 'center') +
+          td(item.stock, 'center') + td(Math.round(item.stock / item.minStock) + '×', 'center') + '</tr>';
+      }).join(''));
+  }
+
+  html += "<h3 style='margin-top:24px;'>Рух за " + MOVEMENT_DAYS + ' днів</h3>';
+  const types = Object.keys(movement.byType);
+  html += "<p style='color:#475569;'>Операцій: <b>" + movement.total + '</b>' +
+    (types.length ? ' (' + types.map(function (t) { return t + ': ' + movement.byType[t]; }).join(', ') + ')' : '') +
+    (movement.cancelled ? ' · скасовано: <b>' + movement.cancelled + '</b>' : '') + '</p>';
+
+  if (movement.top.length) {
+    html += section_('Найбільша витрата', ['Позиція', 'Списано'],
+      movement.top.map(function (row) {
+        return '<tr>' + td(row.name) + td(round_(row.qty), 'center') + '</tr>';
+      }).join(''));
+  }
+
+  const people = Object.keys(movement.byPerson);
+  if (people.length) {
+    html += section_('Хто списував', ['Співробітник', 'Списано'],
+      people.sort(function (a, b) { return movement.byPerson[b] - movement.byPerson[a]; })
+        .map(function (person) {
+          return '<tr>' + td(person) + td(round_(movement.byPerson[person]), 'center') + '</tr>';
+        }).join(''));
+  }
+
+  html += "<p style='font-size:12px; color:#64748b; margin-top:24px;'>Звіт згенеровано автоматично системою «Облік ЗІП» (" +
+    CODE_VERSION + ').</p></div>';
+  return html;
+}
+
+function section_(title, headers, rows) {
+  return "<h3 style='margin-top:24px;'>" + title + '</h3>' +
+    "<table border='1' cellpadding='6' style='border-collapse:collapse; width:100%; border-color:#cbd5e1; font-size:14px;'>" +
+    "<tr style='background:#f1f5f9;'>" + headers.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr>' +
+    rows + '</table>';
+}
+
+/** Рух за N днів. Рядки з категоріями, яких уже немає в таблиці, ігноруються. */
+function collectMovement_(validSheets, days) {
+  const result = { byType: {}, byPerson: {}, top: [], cancelled: 0, total: 0, orphans: 0 };
+  const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOG_SHEET_NAME);
+  if (!logSheet || logSheet.getLastRow() < 2) return result;
+
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const usage = {};
+
+  logSheet.getRange(2, 1, logSheet.getLastRow() - 1, LOG_WIDTH).getValues().forEach(function (row) {
+    const when = new Date(row[0]);
+    if (isNaN(when.getTime()) || when < since) return;
+
+    const category = String(row[2]).trim();
+    if (!validSheets[category]) { result.orphans++; return; }
+
+    const type = String(row[5]).trim();
+    result.total++;
+    if (type.indexOf(CANCEL_PREFIX) === 0) { result.cancelled++; return; }
+    if (type.indexOf(CANCELLED_SUFFIX) !== -1) return;
+
+    result.byType[type] = (result.byType[type] || 0) + 1;
+    if (type !== OPERATIONS.registerUsage.label) return;
+
+    const quantity = toNumber(row[9]);
+    const person = String(row[10]).trim() || String(row[6]).trim() || '—';
+    result.byPerson[person] = (result.byPerson[person] || 0) + quantity;
+    const key = category + ' · ' + String(row[4]).trim();
+    usage[key] = (usage[key] || 0) + quantity;
+  });
+
+  result.top = Object.keys(usage).map(function (name) { return { name: name, qty: usage[name] }; })
+    .sort(function (a, b) { return b.qty - a.qty; }).slice(0, 5);
+  return result;
+}
+
+/**
+ * Сповіщення про перетин порогу: короткий лист про одну позицію, яка щойно
+ * опустилася нижче мінімуму. Не частіше разу на добу на позицію.
+ */
+function maybeNotifyThreshold_(item) {
+  if (isAssetSheet_(item.sheetName)) return;
+  if (!(item.stock < item.minStock)) return;
+
+  const properties = PropertiesService.getScriptProperties();
+  const today = today_();
+  let notices = {};
+  try { notices = JSON.parse(properties.getProperty('thresholdNotices') || '{}'); } catch (e) { notices = {}; }
+
+  // Лишаємо тільки сьогоднішні позначки — сховище не росте
+  Object.keys(notices).forEach(function (key) { if (notices[key] !== today) delete notices[key]; });
+
+  const key = item.sheetName + '_' + item.model;
+  if (notices[key] === today) return;
+  notices[key] = today;
+  properties.setProperty('thresholdNotices', JSON.stringify(notices));
+
+  const emails = getNotificationEmails();
+  if (!emails) return;
+
+  MailApp.sendEmail({
+    to: emails,
+    subject: '⚠️ ЗІП: ' + item.model + ' нижче мінімуму (' + item.stock + ' з ' + item.minStock + ')',
+    htmlBody: "<div style='font-family:sans-serif; color:#1e293b;'>" +
+      '<h3>' + item.model + ' — залишок нижче мінімуму</h3>' +
+      "<table border='1' cellpadding='6' style='border-collapse:collapse; border-color:#cbd5e1;'>" +
+      '<tr><td>Категорія</td><td><b>' + item.sheetName + '</b></td></tr>' +
+      '<tr><td>Обладнання</td><td>' + item.equipment + '</td></tr>' +
+      '<tr><td>📍 Місце</td><td>' + item.storage + '</td></tr>' +
+      '<tr><td>Мінімум</td><td>' + item.minStock + '</td></tr>' +
+      "<tr><td>Залишок</td><td style='color:#b91c1c;'><b>" + item.stock + '</b></td></tr>' +
+      '<tr><td>Постачальник</td><td>' + item.supplier + ' · ' + item.phone + '</td></tr></table>' +
+      "<p style='color:#64748b; font-size:12px;'>Повний звіт — у понеділок або кнопкою в застосунку.</p></div>"
+  });
+}
+
+function isAssetSheet_(name) {
+  return ASSET_SHEET_PREFIXES.some(function (prefix) { return String(name).indexOf(prefix) === 0; });
+}
+
+function today_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd.MM.yyyy');
+}
+
+function round_(value) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+/** Витрата за 30 днів — лише «Видача» і лише за наявними категоріями. */
 function collectUsage30() {
   const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOG_SHEET_NAME);
   const usage = {};
   if (!logSheet || logSheet.getLastRow() < 2) return usage;
 
-  const data = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, LOG_WIDTH).getValues();
+  const valid = {};
+  forEachCatalogSheet(function (sheet) { valid[sheet.getName()] = true; });
+
   const since = new Date();
   since.setDate(since.getDate() - 30);
 
-  data.forEach((row) => {
-    if (row[5] !== 'Видача') return;
+  logSheet.getRange(2, 1, logSheet.getLastRow() - 1, LOG_WIDTH).getValues().forEach(function (row) {
+    if (String(row[5]).trim() !== OPERATIONS.registerUsage.label) return;
+    const category = String(row[2]).trim();
+    if (!valid[category]) return;
     const when = new Date(row[0]);
     if (isNaN(when.getTime()) || when < since) return;
-    const key = row[2] + '_' + row[4];
+    const key = category + '_' + String(row[4]).trim();
     usage[key] = (usage[key] || 0) + toNumber(row[9]);
   });
   return usage;
-}
-
-function buildReportHtml(rows) {
-  return "<h2 style='color:#1e293b; font-family: sans-serif;'>План закупки запасних частин (Залишок ≤ Мінімуму)</h2>" +
-    "<table border='1' cellpadding='8' style='border-collapse: collapse; font-family: sans-serif; width: 100%; border-color: #cbd5e1;'>" +
-    "<tr style='background-color: #f1f5f9; color: #0f172a;'>" +
-    '<th>Категорія</th><th>Модель / Тип</th><th>Обладнання</th><th>Мін. Запас</th>' +
-    "<th style='color:#b91c1c;'>Поточний Залишок</th><th>Використано за 30 днів</th>" +
-    '<th>Рекомендовано замовити</th><th>Постачальник</th><th>Телефон</th></tr>' +
-    rows + '</table>' +
-    "<br><p style='font-size:12px; color:#64748b; font-family: sans-serif;'>Звіт згенеровано автоматично системою «Облік ЗІП».</p>";
 }
 
 function td(value, align, extra) {
@@ -963,6 +1180,14 @@ function forEachCatalogSheet(callback) {
   });
 }
 
+/** Один рядок позиції, доповнений до CAT_WIDTH. */
+function readItemRow_(sheet, row) {
+  const width = Math.min(CAT_WIDTH, sheet.getMaxColumns());
+  const values = sheet.getRange(row, 1, 1, width).getDisplayValues()[0];
+  while (values.length < CAT_WIDTH) values.push('');
+  return values;
+}
+
 /** Читає рядки позицій, доповнюючи їх до CAT_WIDTH, якщо колонки O ще немає. */
 function readCatalog(sheet) {
   const width = Math.min(CAT_WIDTH, sheet.getMaxColumns());
@@ -998,15 +1223,17 @@ function json(payload) {
 // ==========================================
 // 6. ЩОТИЖНЕВИЙ ТРИГЕР (понеділок, 08:00)
 // ==========================================
-function setupMondayTrigger() {
+function setupWeeklyReport() {
+  const obsolete = ['weeklyPurchasePlan', 'sendPurchasePlan', 'weeklyReport'];
   ScriptApp.getProjectTriggers().forEach((trigger) => {
-    if (trigger.getHandlerFunction() === 'weeklyPurchasePlan') ScriptApp.deleteTrigger(trigger);
+    if (obsolete.indexOf(trigger.getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(trigger);
   });
-  ScriptApp.newTrigger('weeklyPurchasePlan').timeBased()
+  ScriptApp.newTrigger('weeklyReport').timeBased()
     .onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(8).create();
+  return 'Щотижневий звіт: понеділок, 08:00';
 }
 
 /** Обгортка: тригер передає у функцію об'єкт події, а не прапорець isManual. */
-function weeklyPurchasePlan() {
-  sendPurchasePlan(false);
+function weeklyReport() {
+  sendReport(false);
 }

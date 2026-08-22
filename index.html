@@ -143,9 +143,9 @@
                 <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
                 Всі списання
             </button>
-            <button id="reportBtn" onclick="forceSendReport()" class="hidden w-full sm:w-auto bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-amber-200" title="Надіслати план закупки на email">
+            <button id="reportBtn" onclick="forceSendReport()" class="hidden w-full sm:w-auto bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-amber-200" title="Сформувати звіт і надіслати на email">
                 <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                Відправити план закупки
+                Надіслати звіт
             </button>
         </div>
 
@@ -765,7 +765,8 @@
             if (!session) { showLogin(); return; }
             if (!can('forceReport')) { customAlert('Ваша роль не дозволяє надсилати план закупки.'); return; }
 
-            const confirm = await showCustomDialog("Сформувати та відправити актуальний план закупки запчастин на email головного інженера?", true);
+            const confirm = await showCustomDialog(
+                'Надіслати звіт на пошту?\n\nУ ньому: що потрібно замовити, що потребує інвентаризації, від’ємні залишки, надлишок і рух за тиждень.', true);
             if (!confirm) return;
 
             const loader = document.getElementById('loadingState');
@@ -784,7 +785,10 @@
                 const response = await fetch(GOOGLE_SCRIPT_URL + "?action=forceReport" + authQuery());
                 const data = await response.json();
                 if (data && data.success) {
-                    customAlert("✅ План закупки успішно відправлено!");
+                    const c = data.counts;
+                    customAlert(c
+                        ? `✅ Звіт надіслано.\n\nДо замовлення: ${c.deficit} (${c.orderTotal} од.)\nПотребує інвентаризації: ${c.notCounted}\nВід’ємний залишок: ${c.negative}\nНадлишок: ${c.excess}`
+                        : '✅ Звіт надіслано.');
                 } else if (data && data.code === 'AUTH') {
                     handleAuthFailure();
                 } else {
