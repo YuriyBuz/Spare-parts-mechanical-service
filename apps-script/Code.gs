@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-22-auth';
+const CODE_VERSION = 'zip-2026-08-22-usage';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -51,9 +51,9 @@ const ATTEMPT_WINDOW_SECONDS = 300;
  * і сервер (перед кожним записом), і клієнт (щоб ховати недоступні кнопки).
  */
 const ROLE_PERMISSIONS = {
-  'zip.use':   ['registerUsage', 'registerInventory'],
-  'zip.admin': ['registerUsage', 'registerInventory', 'registerRestock', 'forceReport'],
-  'admin':     ['registerUsage', 'registerInventory', 'registerRestock', 'forceReport']
+  'zip.use':   ['registerUsage', 'registerInventory', 'cancelOwn'],
+  'zip.admin': ['registerUsage', 'registerInventory', 'registerRestock', 'forceReport', 'cancelOwn', 'cancelAny'],
+  'admin':     ['registerUsage', 'registerInventory', 'registerRestock', 'forceReport', 'cancelOwn', 'cancelAny']
 };
 
 // ==========================================
@@ -299,10 +299,14 @@ const LOG_WIDTH = 11;   // A..K
 const FIRST_DATA_ROW = 4;
 
 const OPERATIONS = {
-  registerUsage:      { label: 'Видача',         prefix: '-' },
-  registerRestock:    { label: 'Поповнення',     prefix: '+' },
-  registerInventory:  { label: 'Інвентаризація', prefix: '=' }
+  registerUsage:      { label: 'Видача',         prefix: '-', genitive: 'видачі',         direction: -1 },
+  registerRestock:    { label: 'Поповнення',     prefix: '+', genitive: 'поповнення',     direction: 1 },
+  registerInventory:  { label: 'Інвентаризація', prefix: '=', genitive: 'інвентаризації', direction: 0 }
 };
+
+const CANCELLED_SUFFIX = ' (скасовано)';
+const CANCEL_PREFIX = 'Скасування ';
+const CANCEL_WINDOW_HOURS = 24;
 
 // ==========================================
 // 0. МЕНЮ
@@ -387,7 +391,11 @@ function doGet(e) {
       const data = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, LOG_WIDTH).getValues();
       const history = [];
       for (let i = data.length - 1; i >= 0 && history.length < 100; i--) {
+        const actionType = String(data[i][5]).trim();
         history.push({
+          id: normalizeTimestamp_(data[i][0]),
+          cancelled: actionType.indexOf(CANCELLED_SUFFIX) !== -1,
+          isCancellation: actionType.indexOf(CANCEL_PREFIX) === 0,
           time: formatTime(data[i][0]),
           date: data[i][1],
           sheetName: data[i][2],
@@ -441,66 +449,279 @@ function doPost(e) {
     if (payload.action === 'login') {
       return json(loginWithPin_(payload.pin, payload.deviceId));
     }
+    if (payload.action === 'cancelOperation') {
+      return json(cancelOperation_(payload));
+    }
+    return json(registerOperation_(payload));
 
-    const operation = OPERATIONS[payload.action];
-    if (!operation) throw new Error('Невідома операція: ' + payload.action);
+  } catch (error) {
+    return json({ success: false, code: error.code || 'ERROR', error: error.message || String(error) });
+  }
+}
 
-    // Права перевіряються на сервері перед кожним записом — незалежно від того,
-    // що показує або ховає інтерфейс
-    const session = requirePermission_(payload, payload.action);
+/**
+ * Видача / поповнення / інвентаризація.
+ * Запис у журнал — джерело правди; залишок перераховується з журналу.
+ */
+function registerOperation_(payload) {
+  const operation = OPERATIONS[payload.action];
+  if (!operation) throw new Error('Невідома операція: ' + payload.action);
 
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(payload.sheetName);
-    if (!sheet) throw new Error('Аркуш не знайдено: ' + payload.sheetName);
+  // Права перевіряються на сервері перед кожним записом — незалежно від того,
+  // що показує або ховає інтерфейс
+  const session = requirePermission_(payload, payload.action);
 
-    const quantity = Number(payload.quantity);
-    if (!isFinite(quantity) || quantity <= 0) throw new Error('Некоректна кількість: ' + payload.quantity);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(payload.sheetName);
+  if (!sheet) throw new Error('Аркуш не знайдено: ' + payload.sheetName);
+
+  const quantity = Number(payload.quantity);
+  const zeroAllowed = payload.action === 'registerInventory';
+  if (!isFinite(quantity) || quantity < 0 || (quantity === 0 && !zeroAllowed)) {
+    throw new Error('Некоректна кількість: ' + payload.quantity);
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
+  try {
+    const log = readLog_();
+
+    // Той самий запис міг прийти вдруге з офлайн-черги — повторно не застосовуємо
+    const duplicate = findLogEntry_(log, payload.timestamp);
+    if (duplicate) {
+      return { success: true, duplicate: true, actor: session.name,
+               newStock: readStock_(sheet, payload.row).value };
+    }
+
+    const stock = readStock_(sheet, payload.row);
+    let location = String(payload.location || '').trim() || '-';
+
+    if (payload.action === 'registerUsage') {
+      if (!stock.counted) {
+        throw authError_('NOT_COUNTED',
+          'Залишок цієї позиції не інвентаризовано. Спершу проведіть інвентаризацію — тоді видача матиме від чого відніматися.');
+      }
+      const available = computeStockFromLog_(log, payload.sheetName, payload.model, stock.value);
+      if (quantity > available) {
+        const reason = String(payload.overdrawReason || '').trim();
+        if (reason.length < 3) {
+          return {
+            success: false, code: 'OVERDRAW', available: available,
+            error: available > 0
+              ? 'На складі лише ' + available + ' шт, а ви списуєте ' + quantity + '.'
+              : 'На складі 0 шт: зареєструйте поповнення або проведіть інвентаризацію.'
+          };
+        }
+        location += ' (перевитрата: ' + reason + ')';
+      }
+    }
 
     const itemNo = sheet.getRange(payload.row, 1).getValue();
     const serial = String(payload.serial || '').trim() || '-';
-    // Хто видав — завжди з підтвердженої сесії, а не з того, що надіслав клієнт
-    const controller = session.name;
-    // Для поповнення та інвентаризації фіксуємо, хто саме їх зробив
-    const usedBy = payload.action === 'registerUsage'
-      ? (String(payload.usedBy || '').trim() || session.name)
-      : session.name;
-    const location = payload.location || '-';
+    // Хто видав і ким використано — завжди з підтвердженої сесії,
+    // а не з того, що надіслав клієнт
+    const actor = session.name;
 
-    // 2.1 Журнал
-    setupLogSheet().appendRow([
-      payload.timestamp, payload.date, payload.sheetName, itemNo, payload.model,
-      operation.label, controller, location, serial, quantity, usedBy
-    ]);
+    const entry = [payload.timestamp, payload.date, payload.sheetName, itemNo, payload.model,
+      operation.label, actor, location, serial, quantity, actor];
+    log.sheet.appendRow(entry);
+    log.rows.push({ row: log.sheet.getLastRow(), values: entry });
 
-    // 2.2 Залишок (E)
-    const stockCell = sheet.getRange(payload.row, 5);
-    const minStock = toNumber(sheet.getRange(payload.row, 4).getValue());
-    const currentVal = toNumber(stockCell.getValue());
-    let newVal = currentVal;
-    if (payload.action === 'registerUsage') newVal = currentVal - quantity;
-    else if (payload.action === 'registerRestock') newVal = currentVal + quantity;
-    else if (payload.action === 'registerInventory') newVal = quantity;
-    stockCell.setValue(newVal);
+    const newVal = applyStock_(sheet, payload.row, log, payload.sheetName, payload.model, stock, operation, quantity);
 
-    // 2.3 Накопичувальні колонки F..K
     appendOperation(sheet, payload.row, [
-      operation.label,
-      formatDate(payload.date),
-      operation.prefix + quantity,
-      serial,
-      location,
-      usedBy
+      operation.label, formatDate(payload.date), operation.prefix + quantity, serial, location, actor
     ]);
 
-    // 2.4 Сповіщення про досягнення мінімуму
+    const minStock = toNumber(sheet.getRange(payload.row, 4).getValue());
     if ((payload.action === 'registerUsage' || payload.action === 'registerInventory') && newVal <= minStock) {
       sendPurchasePlan(false);
     }
 
-    return json({ success: true, newStock: newVal, actor: session.name });
-  } catch (error) {
-    return json({ success: false, code: error.code || 'ERROR', error: error.message || String(error) });
+    return {
+      success: true, newStock: newVal, actor: actor,
+      warning: newVal < 0 ? 'Залишок від\'ємний — проведіть інвентаризацію цієї позиції.' : ''
+    };
+  } finally {
+    lock.releaseLock();
   }
+}
+
+/**
+ * Скасування операції. Рядок журналу не видаляється: початковий помічається
+ * як скасований, а поруч дописується рядок «Скасування …» — видно, хто і коли.
+ */
+function cancelOperation_(payload) {
+  const session = requireSession_(payload);
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
+  try {
+    const log = readLog_();
+    const entry = findLogEntry_(log, payload.timestamp);
+    if (!entry) throw authError_('NOT_FOUND', 'Операцію не знайдено в журналі.');
+
+    const label = String(entry.values[5]).trim();
+    if (label.indexOf(CANCELLED_SUFFIX) !== -1) throw authError_('ALREADY_CANCELLED', 'Цю операцію вже скасовано.');
+    if (label.indexOf(CANCEL_PREFIX) === 0) throw authError_('BAD_TARGET', 'Це рядок скасування — його не скасовують.');
+    if (label === OPERATIONS.registerInventory.label) {
+      throw authError_('BAD_TARGET', 'Інвентаризацію не скасовують: проведіть нову — вона задає залишок наново.');
+    }
+
+    const operation = operationByLabel_(label);
+    if (!operation) throw authError_('BAD_TARGET', 'Невідомий тип операції: ' + label);
+
+    const author = String(entry.values[10]).trim() || String(entry.values[6]).trim();
+    const own = author === session.name || String(entry.values[6]).trim() === session.name;
+    if (own && session.permissions.indexOf('cancelOwn') === -1) {
+      throw authError_('FORBIDDEN', 'Ваша роль не дозволяє скасовувати операції.');
+    }
+    if (!own && session.permissions.indexOf('cancelAny') === -1) {
+      throw authError_('FORBIDDEN', 'Скасувати чужу операцію може лише zip.admin або admin.');
+    }
+
+    const when = new Date(entry.values[0]);
+    const hours = isNaN(when.getTime()) ? 0 : (Date.now() - when.getTime()) / 3600000;
+    if (hours > CANCEL_WINDOW_HOURS && session.permissions.indexOf('cancelAny') === -1) {
+      throw authError_('TOO_LATE', 'Скасувати власну операцію можна протягом ' + CANCEL_WINDOW_HOURS + ' годин.');
+    }
+
+    const sheetName = String(entry.values[2]).trim();
+    const model = String(entry.values[4]).trim();
+    const quantity = toNumber(entry.values[9]);
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) throw authError_('NOT_FOUND', 'Аркуш не знайдено: ' + sheetName);
+    const itemRow = findItemRow_(sheet, model, entry.values[3]);
+    if (!itemRow) throw authError_('NOT_FOUND', 'Позицію «' + model + '» не знайдено на аркуші «' + sheetName + '».');
+
+    // 1. Помічаємо початкову операцію
+    log.sheet.getRange(entry.row, 6).setValue(label + CANCELLED_SUFFIX);
+    entry.values[5] = label + CANCELLED_SUFFIX;
+
+    // 2. Дописуємо рядок скасування
+    const now = new Date();
+    const note = 'Скасовано операцію від ' + formatTimestamp_(entry.values[0]);
+    const cancelEntry = [now.toISOString(), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      sheetName, entry.values[3], model, CANCEL_PREFIX + operation.genitive, session.name,
+      note, String(entry.values[8] || '-'), quantity, session.name];
+    log.sheet.appendRow(cancelEntry);
+    log.rows.push({ row: log.sheet.getLastRow(), values: cancelEntry });
+
+    // 3. Перераховуємо залишок
+    const stock = readStock_(sheet, itemRow);
+    const restored = -operation.direction * quantity;   // скасування видачі повертає на склад
+    const newVal = applyStock_(sheet, itemRow, log, sheetName, model, stock, { direction: 1 }, restored);
+
+    appendOperation(sheet, itemRow, [
+      CANCEL_PREFIX + operation.genitive,
+      Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy'),
+      (restored >= 0 ? '+' : '') + restored, String(entry.values[8] || '-'), note, session.name
+    ]);
+
+    return { success: true, newStock: newVal, actor: session.name, cancelled: label };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ==========================================
+// 2.1 ЖУРНАЛ ЯК ДЖЕРЕЛО ПРАВДИ
+// ==========================================
+function readLog_() {
+  const sheet = setupLogSheet();
+  const lastRow = sheet.getLastRow();
+  const rows = lastRow < 2 ? []
+    : sheet.getRange(2, 1, lastRow - 1, LOG_WIDTH).getValues()
+        .map(function (values, i) { return { row: i + 2, values: values }; });
+  return { sheet: sheet, rows: rows };
+}
+
+function findLogEntry_(log, timestamp) {
+  const wanted = normalizeTimestamp_(timestamp);
+  if (!wanted) return null;
+  for (let i = log.rows.length - 1; i >= 0; i--) {
+    if (normalizeTimestamp_(log.rows[i].values[0]) === wanted) return log.rows[i];
+  }
+  return null;
+}
+
+/**
+ * Залишок із журналу: беремо останню інвентаризацію позиції і застосовуємо
+ * все, що після неї. Скасовані операції та рядки скасування пропускаються —
+ * вони гасять одне одного. Якщо інвентаризації ще не було, спиратися нема на
+ * що: повертаємо fallback (значення з таблиці).
+ */
+function computeStockFromLog_(log, sheetName, model, fallback) {
+  const wantedSheet = String(sheetName).trim();
+  const wantedModel = String(model).trim();
+  let baseline = null;
+  let value = 0;
+
+  log.rows.forEach(function (entry) {
+    if (String(entry.values[2]).trim() !== wantedSheet) return;
+    if (String(entry.values[4]).trim() !== wantedModel) return;
+
+    const label = String(entry.values[5]).trim();
+    if (label.indexOf(CANCEL_PREFIX) === 0) return;
+    if (label.indexOf(CANCELLED_SUFFIX) !== -1) return;
+
+    const quantity = toNumber(entry.values[9]);
+    if (label === OPERATIONS.registerInventory.label) { baseline = quantity; value = quantity; return; }
+    if (baseline === null) return;
+    if (label === OPERATIONS.registerUsage.label) value -= quantity;
+    else if (label === OPERATIONS.registerRestock.label) value += quantity;
+  });
+
+  return baseline === null ? fallback : value;
+}
+
+/** Записує перерахований залишок у колонку E. */
+function applyStock_(sheet, row, log, sheetName, model, stock, operation, quantity) {
+  const fromLog = computeStockFromLog_(log, sheetName, model, null);
+  const newVal = fromLog !== null ? fromLog
+    : (operation.direction === 0 ? quantity : stock.value + operation.direction * quantity);
+  sheet.getRange(row, 5).setValue(newVal);
+  return newVal;
+}
+
+/** Порожня комірка означає «не інвентаризовано», а не нуль. */
+function readStock_(sheet, row) {
+  const raw = sheet.getRange(row, 5).getDisplayValue();
+  return { counted: String(raw).trim() !== '', value: toNumber(raw) };
+}
+
+function findItemRow_(sheet, model, itemNo) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < FIRST_DATA_ROW) return 0;
+
+  const values = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, 2).getDisplayValues();
+  const wantedModel = String(model).trim();
+  const wantedNo = String(itemNo).trim();
+  let fallback = 0;
+
+  for (let i = 0; i < values.length; i++) {
+    if (String(values[i][1]).trim() !== wantedModel) continue;
+    if (String(values[i][0]).trim() === wantedNo) return i + FIRST_DATA_ROW;
+    if (!fallback) fallback = i + FIRST_DATA_ROW;
+  }
+  return fallback;
+}
+
+function operationByLabel_(label) {
+  const key = Object.keys(OPERATIONS).filter(function (name) {
+    return OPERATIONS[name].label === label;
+  })[0];
+  return key ? OPERATIONS[key] : null;
+}
+
+function normalizeTimestamp_(value) {
+  if (value instanceof Date) return value.toISOString();
+  return String(value == null ? '' : value).trim();
+}
+
+function formatTimestamp_(value) {
+  const date = new Date(value);
+  return isNaN(date.getTime()) ? String(value)
+    : Utilities.formatDate(date, Session.getScriptTimeZone(), 'dd.MM.yy HH:mm');
 }
 
 /** Дописує операцію в колонки F..K через кому з переносом рядка. */
