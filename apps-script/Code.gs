@@ -75,8 +75,10 @@ function manualSendReport() {
 function doGet(e) {
   try {
     const action = e.parameter.action;
+    const request = { token: e.parameter.token, deviceId: e.parameter.device };
 
     if (action === 'getInventory') {
+      const session = requireSession_(request);   // застосунок закритий без входу за PIN
       const people = readPeople();
       const categories = [];
 
@@ -105,11 +107,14 @@ function doGet(e) {
         success: true,
         categories: categories,
         controllers: people.controllers,
-        employees: people.employees
+        employees: people.employees,
+        // Права перечитуються щозавантаження: зміна ролі діє одразу
+        session: { name: session.name, shortName: session.shortName, permissions: session.permissions }
       });
     }
 
     if (action === 'getHistory') {
+      requireSession_(request);
       const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOG_SHEET_NAME);
       if (!logSheet || logSheet.getLastRow() < 2) return json({ success: true, history: [] });
 
@@ -133,13 +138,14 @@ function doGet(e) {
     }
 
     if (action === 'forceReport') {
+      requirePermission_(request, 'forceReport');
       sendPurchasePlan(true);
       return json({ success: true, message: 'План надіслано' });
     }
 
     return json({ success: false, error: 'Unknown action' });
   } catch (error) {
-    return json({ success: false, error: error.toString() });
+    return json({ success: false, code: error.code || 'ERROR', error: error.message || String(error) });
   }
 }
 
@@ -149,8 +155,18 @@ function doGet(e) {
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
+
+    // Вхід за PIN — єдина дія, доступна без сесії
+    if (payload.action === 'login') {
+      return json(loginWithPin_(payload.pin, payload.deviceId));
+    }
+
     const operation = OPERATIONS[payload.action];
     if (!operation) throw new Error('Невідома операція: ' + payload.action);
+
+    // Права перевіряються на сервері перед кожним записом — незалежно від того,
+    // що показує або ховає інтерфейс
+    const session = requirePermission_(payload, payload.action);
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(payload.sheetName);
@@ -161,8 +177,12 @@ function doPost(e) {
 
     const itemNo = sheet.getRange(payload.row, 1).getValue();
     const serial = String(payload.serial || '').trim() || '-';
-    const controller = payload.controller || payload.mechanic || '-';
-    const usedBy = payload.action === 'registerUsage' ? (payload.usedBy || controller) : '-';
+    // Хто видав — завжди з підтвердженої сесії, а не з того, що надіслав клієнт
+    const controller = session.name;
+    // Для поповнення та інвентаризації фіксуємо, хто саме їх зробив
+    const usedBy = payload.action === 'registerUsage'
+      ? (String(payload.usedBy || '').trim() || session.name)
+      : session.name;
     const location = payload.location || '-';
 
     // 2.1 Журнал
@@ -196,9 +216,9 @@ function doPost(e) {
       sendPurchasePlan(false);
     }
 
-    return json({ success: true, newStock: newVal });
+    return json({ success: true, newStock: newVal, actor: session.name });
   } catch (error) {
-    return json({ success: false, error: error.toString() });
+    return json({ success: false, code: error.code || 'ERROR', error: error.message || String(error) });
   }
 }
 
