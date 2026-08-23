@@ -554,6 +554,14 @@
             }
         };
 
+        // toISOString() віддає UTC: після 21:00 за Києвом «сьогодні» стає завтрашнім,
+        // і вечірня зміна не бачить власних списань у «Мої за сьогодні»
+        const localDate = (value) => {
+            const d = value ? new Date(value) : new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        };
+
         const authQuery = () => '&token=' + encodeURIComponent(session ? session.token : '') +
                                 '&device=' + encodeURIComponent(getDeviceId());
 
@@ -720,7 +728,7 @@
         const SYNC_INTERVAL_MS = 30000;
         // Ці відповіді сервера повторювати немає сенсу — потрібне рішення людини
         const PERMANENT_CODES = ['FORBIDDEN', 'NOT_FOUND', 'BAD_TARGET', 'NOT_COUNTED',
-                                 'OVERDRAW', 'ALREADY_CANCELLED', 'TOO_LATE'];
+                                 'OVERDRAW', 'ALREADY_CANCELLED', 'TOO_LATE', 'AMBIGUOUS'];
 
         let syncing = false;
 
@@ -1184,7 +1192,9 @@
             try {
                 if (!navigator.onLine) throw new Error("Offline");
                 
-                const data = await apiGet('getHistory');
+                // За «сьогодні» просимо конкретну дату: інакше при активній роботі
+                // свіжі записи випадають за межу останніх 100
+                const data = await apiGet('getHistory' + (onlyToday ? '&date=' + localDate() : ''));
 
                 if (data && data.code === 'AUTH') { handleAuthFailure(); return; }
 
@@ -1422,7 +1432,7 @@
             if (appState.filterHistoryToday) {
                 titleEl.textContent = "Мої списання за сьогодні";
                 const mechanic = session ? session.name : '';
-                const todayStr = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+                const todayStr = localDate();   // дата за місцевим часом, не за UTC
                 
                 filteredHistory = filteredHistory.filter(record => {
                     // Перевіряємо чи дата співпадає з сьогоднішньою (залежить від формату дати в GAS, але GAS має віддавати "YYYY-MM-DD" щоб було легко)
@@ -1600,7 +1610,7 @@
             document.getElementById('useQuantity').value = 1;
             document.getElementById('useLocation').value = item.equipment; // Дефолт
             document.getElementById('useSerial').value = '';
-            document.getElementById('useDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('useDate').value = localDate();
 
             // Типова операція — перша, дозволена роллю
             setOperation(['registerUsage', 'registerInventory', 'registerRestock'].filter(can)[0] || 'registerUsage');
@@ -1763,7 +1773,9 @@
             const payload = {
                 action: currentOperation,
                 sheetName: currentSelectedItem.sheetName,
+                // Рядок — лише підказка: позицію сервер упізнає за парою «№ + модель»
                 row: currentSelectedItem.row,
+                no: currentSelectedItem.no,
                 model: currentSelectedItem.model,
                 quantity: quantity,
                 location: location || '-',
@@ -1788,7 +1800,10 @@
                 const outcome = await sendItem(item.opId);
 
                 if (outcome === 'done') {
-                    showSuccessAndClose(false, outboxItem(item.opId).response);
+                    const answer = outboxItem(item.opId).response;
+                    // Позиція виявилась в іншому рядку — наш каталог застарів
+                    if (answer && answer.moved) fetchData(true);
+                    showSuccessAndClose(false, answer);
                 } else if (outcome === 'auth') {
                     closeUsageModal('auth');
                     handleAuthFailure();

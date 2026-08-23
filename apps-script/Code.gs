@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-23-events';
+const CODE_VERSION = 'zip-2026-08-23-position';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -350,6 +350,7 @@ const ASSET_SHEET_PREFIXES = ['Інструменти', 'Контейнер та
 const STORAGE_COL = 15; // O
 const STORAGE_HEADER = 'Місце зберігання';
 const LOG_WIDTH = 11;   // A..K
+const HISTORY_LIMIT = 300;   // скільки останніх записів віддавати без фільтра за датою
 const FIRST_DATA_ROW = 4;
 
 const OPERATIONS = {
@@ -405,7 +406,7 @@ function manualSendReport() {
 function doGet(e) {
   try {
     const action = e.parameter.action;
-    const request = { token: e.parameter.token, deviceId: e.parameter.device };
+    const request = { token: e.parameter.token, deviceId: e.parameter.device, date: e.parameter.date };
 
     if (action === 'getInventory') {
       const session = requireSession_(request);   // застосунок закритий без входу за PIN
@@ -450,8 +451,13 @@ function doGet(e) {
       if (!logSheet || logSheet.getLastRow() < 2) return json({ success: true, history: [] });
 
       const data = logSheet.getRange(2, 1, logSheet.getLastRow() - 1, LOG_WIDTH).getValues();
+      // За конкретний день віддаємо все: інакше при активній зміні власні записи
+      // механіка випадають за межу останніх HISTORY_LIMIT
+      const wantedDate = String(request.date || '').trim();
+      const limit = wantedDate ? Number.MAX_SAFE_INTEGER : HISTORY_LIMIT;
       const history = [];
-      for (let i = data.length - 1; i >= 0 && history.length < 100; i--) {
+      for (let i = data.length - 1; i >= 0 && history.length < limit; i--) {
+        if (wantedDate && String(data[i][1]).trim().indexOf(wantedDate) === -1) continue;
         const actionType = String(data[i][5]).trim();
         history.push({
           id: normalizeTimestamp_(data[i][0]),
@@ -553,17 +559,19 @@ function registerOperation_(payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
   try {
+    // Номер рядка з клієнта міг застаріти — звіряємо позицію перед будь-яким записом
+    const position = resolvePosition_(sheet, payload);
     const log = readLog_();
 
     // Той самий запис міг прийти вдруге з офлайн-черги — повторно не застосовуємо
     const duplicate = findLogEntry_(log, payload.timestamp,
-      { sheetName: payload.sheetName, model: payload.model, actor: session.name });
+      { sheetName: payload.sheetName, model: payload.model, no: position.itemNo, actor: session.name });
     if (duplicate) {
       return { success: true, duplicate: true, actor: session.name,
-               newStock: readStock_(sheet, payload.row).value };
+               newStock: readStock_(sheet, position.row).value };
     }
 
-    const stock = readStock_(sheet, payload.row);
+    const stock = readStock_(sheet, position.row);
     let location = String(payload.location || '').trim() || '-';
     let discrepancy = null;
 
@@ -571,7 +579,7 @@ function registerOperation_(payload) {
       // Фіксуємо фактичний залишок і те, наскільки він розійшовся з обліковим.
       // Історія не затирається: попередні рядки лишаються, додається новий.
       const accounted = stock.counted
-        ? computeStockFromLog_(log, payload.sheetName, payload.model, stock.value)
+        ? computeStockFromLog_(log, payload.sheetName, payload.model, position.itemNo, stock.value)
         : null;
       discrepancy = {
         accounted: accounted,
@@ -590,7 +598,7 @@ function registerOperation_(payload) {
         throw authError_('NOT_COUNTED',
           'Залишок цієї позиції не інвентаризовано. Спершу проведіть інвентаризацію — тоді видача матиме від чого відніматися.');
       }
-      const available = computeStockFromLog_(log, payload.sheetName, payload.model, stock.value);
+      const available = computeStockFromLog_(log, payload.sheetName, payload.model, position.itemNo, stock.value);
       if (quantity > available) {
         const reason = String(payload.overdrawReason || '').trim();
         if (reason.length < 3) {
@@ -605,7 +613,7 @@ function registerOperation_(payload) {
       }
     }
 
-    const itemNo = sheet.getRange(payload.row, 1).getValue();
+    const itemNo = position.itemNo;
     const serial = String(payload.serial || '').trim() || '-';
     // Хто видав і ким використано — завжди з підтвердженої сесії,
     // а не з того, що надіслав клієнт
@@ -616,15 +624,16 @@ function registerOperation_(payload) {
     log.sheet.appendRow(entry);
     log.rows.push({ row: log.sheet.getLastRow(), values: entry });
 
-    const newVal = applyStock_(sheet, payload.row, log, payload.sheetName, payload.model, stock, operation, quantity);
+    const newVal = applyStock_(sheet, position.row, log, payload.sheetName, payload.model,
+      itemNo, stock, operation, quantity);
 
-    appendOperation(sheet, payload.row, [
+    appendOperation(sheet, position.row, [
       operation.label, formatDate(payload.date), operation.prefix + quantity, serial, location, actor
     ]);
 
     // Сповіщення лише про перетин порогу — не лист після кожного списання
     if (payload.action === 'registerUsage' || payload.action === 'registerInventory') {
-      const info = readItemRow_(sheet, payload.row);
+      const info = readItemRow_(sheet, position.row);
       maybeNotifyThreshold_({
         sheetName: payload.sheetName, model: payload.model,
         equipment: String(info[2] || '').trim() || '—',
@@ -637,6 +646,7 @@ function registerOperation_(payload) {
 
     return {
       success: true, newStock: newVal, actor: actor, discrepancy: discrepancy,
+      row: position.row, moved: position.moved,
       warning: newVal < 0 ? 'Залишок від\'ємний — проведіть інвентаризацію цієї позиції.' : ''
     };
   } finally {
@@ -690,7 +700,8 @@ function cancelOperation_(payload) {
     const quantity = toNumber(entry.values[9]);
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
     if (!sheet) throw authError_('NOT_FOUND', 'Аркуш не знайдено: ' + sheetName);
-    const itemRow = findItemRow_(sheet, model, entry.values[3]);
+    const itemNo = String(entry.values[3] === null || entry.values[3] === undefined ? '' : entry.values[3]).trim();
+    const itemRow = findItemRow_(sheet, model, itemNo);
     if (!itemRow) throw authError_('NOT_FOUND', 'Позицію «' + model + '» не знайдено на аркуші «' + sheetName + '».');
 
     // 1. Помічаємо початкову операцію
@@ -709,7 +720,7 @@ function cancelOperation_(payload) {
     // 3. Перераховуємо залишок
     const stock = readStock_(sheet, itemRow);
     const restored = -operation.direction * quantity;   // скасування видачі повертає на склад
-    const newVal = applyStock_(sheet, itemRow, log, sheetName, model, stock, { direction: 1 }, restored);
+    const newVal = applyStock_(sheet, itemRow, log, sheetName, model, itemNo, stock, { direction: 1 }, restored);
 
     appendOperation(sheet, itemRow, [
       CANCEL_PREFIX + operation.genitive,
@@ -813,6 +824,7 @@ function findLogEntry_(log, timestamp, match) {
     if (match) {
       if (match.sheetName && String(values[2]).trim() !== String(match.sheetName).trim()) continue;
       if (match.model && String(values[4]).trim() !== String(match.model).trim()) continue;
+      if (match.no && String(values[3]).trim() && String(values[3]).trim() !== String(match.no).trim()) continue;
       if (match.actor && String(values[10]).trim() !== String(match.actor).trim() &&
                          String(values[6]).trim() !== String(match.actor).trim()) continue;
     }
@@ -827,15 +839,20 @@ function findLogEntry_(log, timestamp, match) {
  * вони гасять одне одного. Якщо інвентаризації ще не було, спиратися нема на
  * що: повертаємо fallback (значення з таблиці).
  */
-function computeStockFromLog_(log, sheetName, model, fallback) {
+function computeStockFromLog_(log, sheetName, model, itemNo, fallback) {
   const wantedSheet = String(sheetName).trim();
   const wantedModel = String(model).trim();
+  const wantedNo = String(itemNo === null || itemNo === undefined ? '' : itemNo).trim();
   let baseline = null;
   let value = 0;
 
   log.rows.forEach(function (entry) {
     if (String(entry.values[2]).trim() !== wantedSheet) return;
     if (String(entry.values[4]).trim() !== wantedModel) return;
+    // Старі рядки журналу могли залишитись без номера — такі зараховуємо
+    // моделі, як і раніше, щоб перерахунок не з'їхав на історичних даних
+    const entryNo = String(entry.values[3] === null || entry.values[3] === undefined ? '' : entry.values[3]).trim();
+    if (wantedNo && entryNo && entryNo !== wantedNo) return;
 
     const label = String(entry.values[5]).trim();
     if (label.indexOf(CANCEL_PREFIX) === 0) return;
@@ -852,8 +869,8 @@ function computeStockFromLog_(log, sheetName, model, fallback) {
 }
 
 /** Записує перерахований залишок у колонку E. */
-function applyStock_(sheet, row, log, sheetName, model, stock, operation, quantity) {
-  const fromLog = computeStockFromLog_(log, sheetName, model, null);
+function applyStock_(sheet, row, log, sheetName, model, itemNo, stock, operation, quantity) {
+  const fromLog = computeStockFromLog_(log, sheetName, model, itemNo, null);
   const newVal = fromLog !== null ? fromLog
     : (operation.direction === 0 ? quantity : stock.value + operation.direction * quantity);
   sheet.getRange(row, 5).setValue(newVal);
@@ -864,6 +881,70 @@ function applyStock_(sheet, row, log, sheetName, model, stock, operation, quanti
 function readStock_(sheet, row) {
   const raw = sheet.getRange(row, 5).getDisplayValue();
   return { counted: String(raw).trim() !== '', value: toNumber(raw) };
+}
+
+/**
+ * Усі рядки аркуша з такою моделлю. Модель не унікальна: «Сальник 15 x 30 x 7»
+ * стоїть двічі, «Фотодатчик SU-02XP» — чотири рази. Тому позицію визначає
+ * пара «№ + модель», а не сама лише назва.
+ */
+function findPositionRows_(sheet, model, itemNo) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < FIRST_DATA_ROW) return [];
+
+  const values = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, 2).getDisplayValues();
+  const wantedModel = String(model).trim();
+  const wantedNo = String(itemNo === null || itemNo === undefined ? '' : itemNo).trim();
+  const exact = [];
+  const byModel = [];
+
+  values.forEach(function (row, i) {
+    if (String(row[1]).trim() !== wantedModel) return;
+    const found = { row: i + FIRST_DATA_ROW, itemNo: String(row[0]).trim() };
+    byModel.push(found);
+    if (wantedNo && found.itemNo === wantedNo) exact.push(found);
+  });
+
+  return exact.length ? exact : byModel;
+}
+
+/**
+ * Номер рядка приходить із клієнта і міг застаріти: рядок вставили, аркуш
+ * пересортували, запис пролежав ніч в офлайн-черзі. Писати за таким номером
+ * наосліп означає зменшити залишок сусідньої деталі, тому спершу звіряємо,
+ * що в рядку стоїть та сама позиція, і лише потім шукаємо її заново.
+ */
+function resolvePosition_(sheet, payload) {
+  const wantedModel = String(payload.model || '').trim();
+  if (!wantedModel) throw authError_('BAD_TARGET', 'Не вказано позицію.');
+  const wantedNo = String(payload.no === null || payload.no === undefined ? '' : payload.no).trim();
+
+  const row = Number(payload.row);
+  if (isFinite(row) && row >= FIRST_DATA_ROW && row <= sheet.getLastRow()) {
+    const values = sheet.getRange(row, 1, 1, 2).getDisplayValues()[0];
+    const sameModel = String(values[1]).trim() === wantedModel;
+    const sameNo = !wantedNo || String(values[0]).trim() === wantedNo;
+    if (sameModel && sameNo) {
+      return { row: row, itemNo: String(values[0]).trim(), moved: false };
+    }
+  }
+
+  const matches = findPositionRows_(sheet, wantedModel, wantedNo);
+  if (matches.length === 0) {
+    throw authError_('BAD_TARGET', 'Позицію «' + wantedModel + '» не знайдено на аркуші «' +
+      sheet.getName() + '». Можливо, її видалили або перейменували — оновіть базу в застосунку.');
+  }
+  if (matches.length > 1) {
+    throw authError_('AMBIGUOUS', 'На аркуші «' + sheet.getName() + '» кілька рядків із назвою «' +
+      wantedModel + '» (№ ' + matches.map(function (m) { return m.itemNo || '?'; }).join(', ') +
+      '). Оновіть базу в застосунку й виберіть позицію заново.');
+  }
+
+  // Не помилка, а відновлення: рядок знайшли й запис пішов куди треба
+  logEvent_('tech', 'position.moved',
+    'рядок ' + payload.row + ' → ' + matches[0].row,
+    sheet.getName() + ' · ' + wantedModel);
+  return { row: matches[0].row, itemNo: matches[0].itemNo, moved: true };
 }
 
 function findItemRow_(sheet, model, itemNo) {
@@ -959,7 +1040,7 @@ function buildReport_() {
 
       if (item.stock < item.minStock) {                    // строгий дефіцит
         item.gap = item.minStock - item.stock;
-        item.used30 = usage30[name + '_' + item.model] || 0;
+        item.used30 = usage30[usageKey_(name, item.no, item.model)] || 0;
         item.order = item.gap + item.used30;
         deficit.push(item);
       } else if (item.minStock > 0 && item.stock >= item.minStock * EXCESS_FACTOR) {
@@ -1171,6 +1252,13 @@ function round_(value) {
 }
 
 /** Витрата за 30 днів — лише «Видача» і лише за наявними категоріями. */
+/** Ключ витрати: без номера однойменні рядки ділили б між собою одну витрату. */
+function usageKey_(sheetName, itemNo, model) {
+  return String(sheetName).trim() + '_' +
+         String(itemNo === null || itemNo === undefined ? '' : itemNo).trim() + '_' +
+         String(model).trim();
+}
+
 function collectUsage30() {
   const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(LOG_SHEET_NAME);
   const usage = {};
@@ -1188,7 +1276,7 @@ function collectUsage30() {
     if (!valid[category]) return;
     const when = new Date(row[0]);
     if (isNaN(when.getTime()) || when < since) return;
-    const key = category + '_' + String(row[4]).trim();
+    const key = usageKey_(category, row[3], row[4]);
     usage[key] = (usage[key] || 0) + toNumber(row[9]);
   });
   return usage;
