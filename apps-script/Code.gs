@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-23-position';
+const CODE_VERSION = 'zip-2026-08-23-time-qty';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -353,6 +353,10 @@ const LOG_WIDTH = 11;   // A..K
 const HISTORY_LIMIT = 300;   // скільки останніх записів віддавати без фільтра за датою
 const FIRST_DATA_ROW = 4;
 
+// ЗІП рахують у штуках, тож «2,5 підшипника» — це описка, а не операція.
+// Якщо колись з'являться позиції в метрах чи кілограмах, перемкніть на true.
+const ALLOW_FRACTIONAL_QUANTITY = false;
+
 const OPERATIONS = {
   registerUsage:      { label: 'Видача',         prefix: '-', genitive: 'видачі',         direction: -1 },
   registerRestock:    { label: 'Поповнення',     prefix: '+', genitive: 'поповнення',     direction: 1 },
@@ -555,6 +559,10 @@ function registerOperation_(payload) {
   if (!isFinite(quantity) || quantity < 0 || (quantity === 0 && !zeroAllowed)) {
     throw new Error('Некоректна кількість: ' + payload.quantity);
   }
+  if (!ALLOW_FRACTIONAL_QUANTITY && Math.floor(quantity) !== quantity) {
+    throw authError_('BAD_QUANTITY',
+      'Кількість має бути цілим числом штук, а не «' + payload.quantity + '».');
+  }
 
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
@@ -619,7 +627,7 @@ function registerOperation_(payload) {
     // а не з того, що надіслав клієнт
     const actor = session.name;
 
-    const entry = [payload.timestamp, payload.date, payload.sheetName, itemNo, payload.model,
+    const entry = [localStamp_(payload.timestamp), payload.date, payload.sheetName, itemNo, payload.model,
       operation.label, actor, location, serial, quantity, actor];
     log.sheet.appendRow(entry);
     log.rows.push({ row: log.sheet.getLastRow(), values: entry });
@@ -711,7 +719,7 @@ function cancelOperation_(payload) {
     // 2. Дописуємо рядок скасування
     const now = new Date();
     const note = 'Скасовано операцію від ' + formatTimestamp_(entry.values[0]);
-    const cancelEntry = [now.toISOString(), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+    const cancelEntry = [localStamp_(now), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
       sheetName, entry.values[3], model, CANCEL_PREFIX + operation.genitive, session.name,
       note, String(entry.values[8] || '-'), quantity, session.name];
     log.sheet.appendRow(cancelEntry);
@@ -971,9 +979,28 @@ function operationByLabel_(label) {
   return key ? OPERATIONS[key] : null;
 }
 
+/**
+ * Канонічний вигляд мітки часу для порівнянь. Один і той самий момент може
+ * лежати в таблиці як «+03:00», прилетіти з клієнта як «Z», а зі старих рядків
+ * прийти об'єктом Date — дедуплікація має впізнати всі три.
+ */
 function normalizeTimestamp_(value) {
   if (value instanceof Date) return value.toISOString();
-  return String(value == null ? '' : value).trim();
+  const text = String(value == null ? '' : value).trim();
+  if (!text) return '';
+  const date = new Date(text);
+  return isNaN(date.getTime()) ? text : date.toISOString();
+}
+
+/**
+ * Те саме, але для очей: у таблицю пишемо час у часовому поясі таблиці.
+ * Раніше там стояв UTC із «Z», тож о 15:37 за Києвом у журналі бачили 12:37.
+ * Мілісекунди лишаються — саме вони роблять мітку ідентифікатором операції.
+ */
+function localStamp_(value) {
+  const date = new Date(value);
+  if (isNaN(date.getTime())) return String(value == null ? '' : value).trim();
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ss.SSSXXX");
 }
 
 function formatTimestamp_(value) {

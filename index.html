@@ -247,7 +247,7 @@
 
                     <div>
                         <label id="qtyLabel" class="block text-sm font-bold mb-1 text-gray-700">Кількість використано (шт):</label>
-                        <input type="number" id="useQuantity" min="1" value="1" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold text-lg text-center" inputmode="numeric">
+                        <input type="number" id="useQuantity" min="1" step="1" value="1" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold text-lg text-center" inputmode="numeric">
                     </div>
 
                     <div id="usedByWrap" class="bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -728,7 +728,8 @@
         const SYNC_INTERVAL_MS = 30000;
         // Ці відповіді сервера повторювати немає сенсу — потрібне рішення людини
         const PERMANENT_CODES = ['FORBIDDEN', 'NOT_FOUND', 'BAD_TARGET', 'NOT_COUNTED',
-                                 'OVERDRAW', 'ALREADY_CANCELLED', 'TOO_LATE', 'AMBIGUOUS'];
+                                 'OVERDRAW', 'ALREADY_CANCELLED', 'TOO_LATE', 'AMBIGUOUS',
+                                 'BAD_QUANTITY'];
 
         let syncing = false;
 
@@ -1692,7 +1693,7 @@
             if (!item) return false;
 
             if (item.code === 'OVERDRAW') {
-                const available = Number(item.response && item.response.available) || 0;
+                const available = Math.floor(Number(item.response && item.response.available) || 0);
                 const choice = await showChoiceDialog(item.lastError + '<br><br>Що робимо?',
                     (available > 0 ? [{ key: 'limit', label: 'Списати наявні ' + available + ' шт', primary: true }] : [])
                     .concat([{ key: 'reason', label: 'Списати понад залишок і пояснити' },
@@ -1746,6 +1747,11 @@
             if (!currentSelectedItem) return;
 
             const quantity = parseFloat(document.getElementById('useQuantity').value);
+            // ЗІП рахують у штуках: «2,5 підшипника» — це описка
+            if (isFinite(quantity) && Math.floor(quantity) !== quantity) {
+                customAlert('Кількість вказують цілими штуками.\nВи ввели ' + quantity + '.');
+                return;
+            }
             const location = document.getElementById('useLocation').value.trim();
             const serial = document.getElementById('useSerial').value.trim();
             const date = document.getElementById('useDate').value; // Формат "YYYY-MM-DD"
