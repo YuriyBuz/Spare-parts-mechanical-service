@@ -325,17 +325,6 @@
         // --- НАЛАШТУВАННЯ ---
         const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwfDj4chPzg50KbKwfcPX3dA92I2Vz14z3_ICA2arDEYb-Vk0X3GNDZj3eCg8GximMS/exec'; 
 
-        const MOCK_DATA = [
-            {
-                name: "Підшипники",
-                items: [
-                    { sheetName: "Підшипники", row: 4, no: "1", model: "6200-2RSH", equipment: "Twist off-натяжні ролики ременів", minStock: 10, currentStock: 9, supplierName: "ТОВ ПромПідшипник", supplierPhone: "050-123-45-67" },
-                    { sheetName: "Підшипники", row: 5, no: "2", model: "6201-2Z", equipment: "Електро пила", minStock: 2, currentStock: 1 },
-                    { sheetName: "Підшипники", row: 6, no: "3", model: "608-2RSH", equipment: "ПакТех-направляючі", minStock: 2, currentStock: -1, supplierName: "ФОП Іваненко", supplierPhone: "067-987-65-43" },
-                ]
-            }
-        ];
-
         let allData = []; 
         let historyData = [];
         let appState = {
@@ -566,6 +555,24 @@
 
         const authQuery = () => '&token=' + encodeURIComponent(session ? session.token : '') +
                                 '&device=' + encodeURIComponent(getDeviceId());
+
+        // Читання теж має обмеження часу. Wi-Fi у цеху вміє прийняти з'єднання
+        // і не відповісти нічого: без таймауту застосунок назавжди лишався б
+        // на «Завантаження бази ЗІП…».
+        const READ_TIMEOUT_MS = 20000;      // каталог на 250 позицій читається довше за запис
+        const REPORT_TIMEOUT_MS = 60000;    // звіт ще й формується та надсилається
+
+        const apiGet = async (action, timeoutMs) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs || READ_TIMEOUT_MS);
+            try {
+                const response = await fetch(GOOGLE_SCRIPT_URL + '?action=' + action + authQuery(),
+                                             { redirect: 'follow', signal: controller.signal });
+                return await response.json();
+            } finally {
+                clearTimeout(timer);
+            }
+        };
 
         // --- Локальне розблокування без мережі ---
         // На пристрої зберігається не PIN, а повільно обчислений перевірник.
@@ -1044,8 +1051,7 @@
                     return;
                 }
 
-                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=getInventory" + authQuery());
-                const data = await response.json();
+                const data = await apiGet('getInventory');
 
                 if (data && data.code === 'AUTH') { handleAuthFailure(); return; }
 
@@ -1067,11 +1073,19 @@
                 }
             } catch (error) {
                 console.error("Fetch error:", error);
+                const timedOut = error && error.name === 'AbortError';
                 const cached = localStorage.getItem(CACHE_KEY);
                 if (cached) {
                     allData = JSON.parse(cached);
+                    if (!silent) customAlert(timedOut
+                        ? 'Сервер не відповів вчасно.\nПоказано збережену базу — залишки можуть бути застарілі.'
+                        : 'Не вдалося оновити базу.\nПоказано збережену — залишки можуть бути застарілі.');
                 } else {
-                    allData = MOCK_DATA; 
+                    // Показувати вигадані залишки на складі не можна: краще чесна відмова
+                    allData = [];
+                    if (!silent) customAlert(timedOut
+                        ? 'Сервер не відповідає, а бази на цьому пристрої ще немає.\nСпробуйте ще раз, коли буде зв’язок.'
+                        : 'Не вдалося завантажити базу, а збереженої копії на пристрої ще немає.\nПеревірте зв’язок і спробуйте ще раз.');
                 }
                 renderState();
             } finally {
@@ -1095,8 +1109,7 @@
             try {
                 if (!navigator.onLine) throw new Error("Offline");
                 
-                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=getHistory" + authQuery());
-                const data = await response.json();
+                const data = await apiGet('getHistory');
 
                 if (data && data.code === 'AUTH') { handleAuthFailure(); return; }
 
@@ -1136,8 +1149,7 @@
                 if (!navigator.onLine) {
                     throw new Error("Offline");
                 }
-                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=forceReport" + authQuery());
-                const data = await response.json();
+                const data = await apiGet('forceReport', REPORT_TIMEOUT_MS);
                 if (data && data.success) {
                     const c = data.counts;
                     customAlert(c
