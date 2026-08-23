@@ -1,0 +1,65 @@
+{
+  "name": "Облік ЗІП: Механік",
+  "short_name": "ЗІП Механік",
+  "description": "Журнал використання запчастин: списання ЗІП, залишки, історія рухів та план закупки. Працює офлайн.",
+  "lang": "uk",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "any",
+  "background_color": "#f8fafc",
+  "theme_color": "#10b981",
+  "categories": ["business", "productivity", "utilities"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Мої списання за сьогодні",
+      "short_name": "Мої за сьогодні",
+      "description": "Історія деталей, які ви списали сьогодні",
+      "url": "./?view=history-today",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Всі списання",
+      "short_name": "Всі списання",
+      "description": "Загальна історія рухів ЗІП",
+      "url": "./?view=history",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Пошук деталі",
+      "short_name": "Пошук",
+      "description": "Одразу перейти до пошуку по базі ЗІП",
+      "url": "./?view=search",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ]
+}

@@ -5,12 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Облік ЗІП: Механік</title>
     
-    <link rel="manifest" id="manifest-link">
-    <meta name="theme-color" content="#f8fafc">
+    <meta name="description" content="Журнал використання запчастин: списання ЗІП, залишки, історія рухів та план закупки. Працює офлайн.">
+
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#10b981">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="Облік ЗІП">
-    <link rel="apple-touch-icon" href="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp">
+    <meta name="apple-mobile-web-app-title" content="ЗІП Механік">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root {
@@ -99,19 +104,6 @@
 </head>
 <body class="font-sans">
 
-    <script>
-        const manifest = {
-            "name": "Облік ЗІП",
-            "short_name": "ЗІП Механік",
-            "description": "Додаток для реєстрації використання запчастин",
-            "start_url": ".",
-            "display": "standalone",
-            "background_color": "#f8fafc",
-            "theme_color": "#10b981"
-        };
-        document.getElementById('manifest-link').href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
-    </script>
-
     <div class="container mx-auto max-w-3xl p-4 sm:p-6 relative">
         <header class="relative text-center mb-6">
             <div class="absolute top-0 left-0 text-center">
@@ -131,16 +123,14 @@
             <h1 class="text-xl sm:text-2xl font-bold text-gray-800">Журнал використання ЗІП</h1>
         </header>
 
-        <!-- Вибір механіка -->
-        <div class="mb-4 card p-4 rounded-xl shadow-sm border border-gray-200">
-            <label for="employeeSelect" class="block text-sm font-bold mb-2 text-gray-700">Механік (Хто взяв деталь?):</label>
-            <select id="employeeSelect" class="block w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold text-lg text-gray-800">
-                <option value="">-- Оберіть зі списку --</option>
-                <option value="Свінцов Михайло">Свінцов Михайло</option>
-                <option value="Гора Андрій">Гора Андрій</option>
-                <option value="Галагін Евгеній">Галагін Евгеній</option>
-                <option value="Бузницький Юрій">Бузницький Юрій</option>
-            </select>
+        <!-- Хто працює в застосунку -->
+        <div class="mb-4 card p-4 rounded-xl shadow-sm border border-gray-200 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+                <div class="text-xs text-muted font-medium">Ви увійшли як</div>
+                <div class="font-bold text-lg text-gray-800 truncate" id="sessionName">—</div>
+                <div class="text-xs text-emerald-700 font-semibold" id="sessionRole"></div>
+            </div>
+            <button id="logoutBtn" class="flex-shrink-0 text-sm font-bold text-gray-500 hover:text-red-600 border border-gray-200 rounded-lg px-3 py-2 transition-colors">Вийти</button>
         </div>
 
         <!-- Кнопки дій -->
@@ -153,9 +143,9 @@
                 <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
                 Всі списання
             </button>
-            <button onclick="forceSendReport()" class="w-full sm:w-auto bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-amber-200" title="Надіслати план закупки на email">
+            <button id="reportBtn" onclick="forceSendReport()" class="hidden w-full sm:w-auto bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors flex items-center justify-center border border-amber-200" title="Сформувати звіт і надіслати на email">
                 <svg class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                Відправити план закупки
+                Надіслати звіт
             </button>
         </div>
 
@@ -235,24 +225,48 @@
                     </button>
                 </div>
 
-                <div class="bg-gray-100 p-3 rounded-lg flex justify-between items-center mb-6 border border-gray-200">
+                <div class="bg-gray-100 p-3 rounded-lg flex justify-between items-center mb-3 border border-gray-200">
                     <span class="font-medium text-sm text-gray-700">Поточний залишок:</span>
                     <span class="font-bold text-lg text-gray-900" id="modalCurrentStock">18 шт</span>
                 </div>
 
+                <div class="flex justify-between items-center mb-6 px-1">
+                    <span class="text-sm text-gray-700">📍 Місце: <span class="font-bold text-gray-900" id="modalStorage">не вказано</span></span>
+                    <button id="editStorageBtn" class="hidden text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1 hover:bg-emerald-100 transition-colors">Змінити</button>
+                </div>
+
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-bold mb-1 text-gray-700">Кількість використано (шт):</label>
-                        <input type="number" id="useQuantity" min="1" value="1" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold text-lg text-center" inputmode="numeric">
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Операція:</label>
+                        <div class="grid grid-cols-3 gap-2" id="operationSwitch">
+                            <button type="button" data-op="registerUsage" class="op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors">Видача</button>
+                            <button type="button" data-op="registerRestock" class="op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors">Поповнення</button>
+                            <button type="button" data-op="registerInventory" class="op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors">Інвентар.</button>
+                        </div>
                     </div>
-                    
+
                     <div>
-                        <label class="block text-sm font-bold mb-1 text-gray-700">Де було використано:</label>
+                        <label id="qtyLabel" class="block text-sm font-bold mb-1 text-gray-700">Кількість використано (шт):</label>
+                        <input type="number" id="useQuantity" min="1" step="1" value="1" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 font-bold text-lg text-center" inputmode="numeric">
+                    </div>
+
+                    <div id="usedByWrap" class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                        <div class="text-xs text-muted font-medium">Ким було використано</div>
+                        <div class="font-bold text-gray-800" id="usedByName">—</div>
+                    </div>
+
+                    <div>
+                        <label id="locationLabel" class="block text-sm font-bold mb-1 text-gray-700">Де було використано:</label>
                         <input type="text" id="useLocation" placeholder="Наприклад: Лінія 1, мотор конвеєра" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
                     </div>
 
                     <div>
-                        <label class="block text-sm font-bold mb-1 text-gray-700">Дата використання:</label>
+                        <label class="block text-sm font-bold mb-1 text-gray-700">Заводський № / партія (необов'язково):</label>
+                        <input type="text" id="useSerial" placeholder="—" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
+                    </div>
+
+                    <div>
+                        <label id="dateLabel" class="block text-sm font-bold mb-1 text-gray-700">Дата використання:</label>
                         <input type="date" id="useDate" class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-emerald-500 text-base">
                     </div>
                 </div>
@@ -260,9 +274,41 @@
                 <div class="mt-8 flex gap-3">
                     <button id="submitUsageBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-transform active:scale-95 text-lg flex justify-center items-center">
                         <svg class="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        Зареєструвати
+                        <span id="submitBtnText">Зареєструвати видачу</span>
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Вхід за PIN -->
+    <div id="loginOverlay" class="fixed inset-0 hidden items-center justify-center modal-overlay z-[2500] p-4">
+        <div class="card w-full max-w-sm rounded-2xl shadow-xl p-6 border border-gray-200">
+            <img src="https://foodline-production.com/wp-content/uploads/2021/10/3752781497_3752781497.webp" alt="" class="w-14 h-auto mx-auto mb-3 rounded-lg" onerror="this.style.display='none'">
+            <h2 class="text-xl font-bold text-center text-gray-800 mb-1">Облік ЗІП</h2>
+            <p class="text-sm text-muted text-center mb-5">Введіть свій PIN, щоб увійти</p>
+            <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" placeholder="••••"
+                   class="w-full p-3 border rounded-lg text-center text-2xl tracking-widest font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <p id="loginError" class="hidden text-sm text-red-600 font-medium mt-3 text-center"></p>
+            <button id="loginBtn" class="mt-5 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-lg transition-transform active:scale-95 text-lg flex justify-center items-center">Увійти</button>
+        </div>
+    </div>
+
+    <!-- Черга операцій -->
+    <div id="queueOverlay" class="fixed inset-0 hidden items-end sm:items-center justify-center modal-overlay z-[2200] p-0 sm:p-4">
+        <div class="card w-full max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col" style="max-height: 85vh;">
+            <div class="p-5 border-b border-gray-200 flex items-start justify-between">
+                <div>
+                    <h3 class="text-lg font-bold text-gray-900">Черга операцій</h3>
+                    <p class="text-xs text-muted" id="queueSummary">—</p>
+                </div>
+                <button id="closeQueueBtn" class="text-gray-400 hover:text-gray-600 ml-2">
+                    <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="queueList" class="overflow-y-auto p-4 flex flex-col gap-3"></div>
+            <div class="p-4 border-t border-gray-200">
+                <button id="queueFlushBtn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl shadow transition-transform active:scale-95">Надіслати все</button>
             </div>
         </div>
     </div>
@@ -279,17 +325,6 @@
         // --- НАЛАШТУВАННЯ ---
         const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwfDj4chPzg50KbKwfcPX3dA92I2Vz14z3_ICA2arDEYb-Vk0X3GNDZj3eCg8GximMS/exec'; 
 
-        const MOCK_DATA = [
-            {
-                name: "Підшипники",
-                items: [
-                    { sheetName: "Підшипники", row: 4, no: "1", model: "6200-2RSH", equipment: "Twist off-натяжні ролики ременів", minStock: 10, currentStock: 9, supplierName: "ТОВ ПромПідшипник", supplierPhone: "050-123-45-67" },
-                    { sheetName: "Підшипники", row: 5, no: "2", model: "6201-2Z", equipment: "Електро пила", minStock: 2, currentStock: 1 },
-                    { sheetName: "Підшипники", row: 6, no: "3", model: "608-2RSH", equipment: "ПакТех-направляючі", minStock: 2, currentStock: -1, supplierName: "ФОП Іваненко", supplierPhone: "067-987-65-43" },
-                ]
-            }
-        ];
-
         let allData = []; 
         let historyData = [];
         let appState = {
@@ -298,8 +333,16 @@
             filterHistoryToday: false
         };
         let currentSelectedItem = null;
+        let currentOperation = 'registerUsage';
+        let peopleLists = { controllers: [], employees: [] };
+        // Використовується, доки аркуш «Користувачі» в таблиці не заповнено
+        const FALLBACK_PEOPLE = ['Гора Андрій Олександрович', 'Галагін Євгеній Ярославович', 'Сабадаш Геннадій Петрович'];
         const OFFLINE_KEY = 'zipOfflineQueueV3';
+        const SESSION_KEY = 'zipSessionV1';
+        const DEVICE_KEY = 'zipDeviceIdV1';
+        let session = null;
         const CACHE_KEY = 'zipInventoryCacheV3';
+        const PEOPLE_KEY = 'zipPeopleV1';
 
         // --- Custom Dialog System ---
         const showCustomDialog = (message, isConfirm = false) => {
@@ -342,100 +385,728 @@
             });
         };
 
-        const showPasswordDialog = () => {
+        // Діалог із кількома варіантами: повертає ключ обраної кнопки
+        const showChoiceDialog = (message, buttons) => {
             return new Promise((resolve) => {
                 const overlay = document.getElementById('customDialogOverlay');
                 const msgEl = document.getElementById('customDialogMessage');
                 const btnsEl = document.getElementById('customDialogButtons');
 
-                msgEl.innerHTML = 'Введіть пароль для відправки плану:<br><input type="password" id="reportPassword" class="mt-4 w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-center text-lg" placeholder="****">';
+                msgEl.innerHTML = message;
+                btnsEl.innerHTML = '';
+                btnsEl.className = 'flex flex-col gap-2';
+
+                const close = () => {
+                    overlay.classList.add('hidden');
+                    overlay.classList.remove('flex');
+                    btnsEl.className = 'flex justify-center gap-3';
+                };
+
+                buttons.forEach(button => {
+                    const el = document.createElement('button');
+                    el.className = 'px-4 py-3 rounded-lg font-semibold transition-colors ' +
+                        (button.primary ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-md'
+                                        : 'bg-gray-200 text-gray-800 hover:bg-gray-300');
+                    el.textContent = button.label;
+                    el.onclick = () => { close(); resolve(button.key); };
+                    btnsEl.appendChild(el);
+                });
+
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+            });
+        };
+
+        // Введення тексту (причина перевитрати): повертає рядок або null
+        const showPromptDialog = (message, placeholder) => {
+            return new Promise((resolve) => {
+                const overlay = document.getElementById('customDialogOverlay');
+                const msgEl = document.getElementById('customDialogMessage');
+                const btnsEl = document.getElementById('customDialogButtons');
+
+                msgEl.innerHTML = message +
+                    '<input type="text" id="promptInput" class="mt-4 w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-base" placeholder="' + (placeholder || '') + '">';
                 btnsEl.innerHTML = '';
 
-                const closeDialog = () => {
+                const close = () => {
                     overlay.classList.add('hidden');
                     overlay.classList.remove('flex');
                 };
 
-                const btnCancel = document.createElement('button');
-                btnCancel.className = 'px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition-colors';
-                btnCancel.textContent = 'Скасувати';
-                btnCancel.onclick = () => { closeDialog(); resolve(null); };
+                const cancel = document.createElement('button');
+                cancel.className = 'px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition-colors';
+                cancel.textContent = 'Скасувати';
+                cancel.onclick = () => { close(); resolve(null); };
 
-                const btnOk = document.createElement('button');
-                btnOk.className = 'px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold hover:bg-emerald-600 transition-colors shadow-md';
-                btnOk.textContent = 'Підтвердити';
-                btnOk.onclick = () => {
-                    const pwd = document.getElementById('reportPassword').value;
-                    closeDialog();
-                    resolve(pwd);
+                const confirm = document.createElement('button');
+                confirm.className = 'px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold hover:bg-emerald-600 transition-colors shadow-md';
+                confirm.textContent = 'Підтвердити';
+                confirm.onclick = () => {
+                    const value = document.getElementById('promptInput').value.trim();
+                    close();
+                    resolve(value || null);
                 };
 
-                btnsEl.appendChild(btnCancel);
-                btnsEl.appendChild(btnOk);
-
+                btnsEl.appendChild(cancel);
+                btnsEl.appendChild(confirm);
                 overlay.classList.remove('hidden');
                 overlay.classList.add('flex');
-                
-                // Фокус на поле вводу
-                setTimeout(() => document.getElementById('reportPassword').focus(), 100);
+                setTimeout(() => document.getElementById('promptInput').focus(), 100);
             });
         };
 
         const customAlert = (msg) => showCustomDialog(msg, false);
 
-        // --- Мережа та Офлайн ---
+        // --- Сесія ---
+        // Токен, ім'я, роль і перелік дозволених дій лежать у localStorage.
+        // PIN не зберігається ніде: він іде на сервер один раз під час входу.
+        const getDeviceId = () => {
+            let id = localStorage.getItem(DEVICE_KEY);
+            if (!id) {
+                id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+                     : Date.now().toString(36) + Math.random().toString(36).slice(2);
+                localStorage.setItem(DEVICE_KEY, id);
+            }
+            return id;
+        };
+
+        const loadSession = () => {
+            try {
+                const stored = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+                if (stored && stored.token && stored.expiresAt > Date.now()) return stored;
+            } catch (e) { /* зіпсований запис — вважаємо, що сесії немає */ }
+            localStorage.removeItem(SESSION_KEY);
+            return null;
+        };
+
+        const saveSession = (value) => {
+            session = value;
+            localStorage.setItem(SESSION_KEY, JSON.stringify(value));
+        };
+
+        const clearSession = () => {
+            session = null;
+            localStorage.removeItem(SESSION_KEY);
+        };
+
+        // --- Автовихід через 10 хвилин бездіяльності ---
+        const IDLE_LIMIT_MS = 10 * 60 * 1000;
+        const ACTIVITY_KEY = 'zipLastActivityV1';
+        let idleTimer = null;
+        let lastActivityWrite = 0;
+
+        const autoLogout = () => {
+            if (!session) return;
+            logEvent('tech', 'session.idleLogout', 'бездіяльність понад 10 хв');
+            clearSession();
+            applyPermissions();
+            closeUsageModal('idle');
+            showLogin('Сесію завершено через 10 хвилин бездіяльності. Увійдіть за PIN.');
+        };
+
+        const markActivity = () => {
+            if (!session) return;
+            const now = Date.now();
+            if (now - lastActivityWrite > 5000) {
+                localStorage.setItem(ACTIVITY_KEY, String(now));
+                lastActivityWrite = now;
+            }
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(autoLogout, IDLE_LIMIT_MS);
+        };
+
+        // Сторінку могли просто закрити: перевіряємо простій і після перезавантаження
+        const isIdleExpired = () => {
+            const last = Number(localStorage.getItem(ACTIVITY_KEY) || 0);
+            return !!last && Date.now() - last > IDLE_LIMIT_MS;
+        };
+
+        const startIdleWatch = () => {
+            ['click', 'keydown', 'touchstart', 'scroll'].forEach(type =>
+                document.addEventListener(type, markActivity, { passive: true }));
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && session && isIdleExpired()) autoLogout();
+            });
+            markActivity();
+        };
+
+        const can = (action) => !!session && (session.permissions || []).indexOf(action) !== -1;
+
+        // Content-Type: text/plain — «простий» запит, тому браузер не робить preflight,
+        // а відповідь Apps Script можна прочитати (на відміну від mode:'no-cors')
+        const REQUEST_TIMEOUT_MS = 8000;
+
+        const apiPost = async (payload) => {
+            // Замість довіри до navigator.onLine — реальна спроба з обмеженням часу
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+            try {
+                const response = await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload),
+                    redirect: 'follow',
+                    signal: controller.signal
+                });
+                return await response.json();
+            } finally {
+                clearTimeout(timer);
+            }
+        };
+
+        // toISOString() віддає UTC: після 21:00 за Києвом «сьогодні» стає завтрашнім,
+        // і вечірня зміна не бачить власних списань у «Мої за сьогодні»
+        const localDate = (value) => {
+            const d = value ? new Date(value) : new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        };
+
+        const authQuery = () => '&token=' + encodeURIComponent(session ? session.token : '') +
+                                '&device=' + encodeURIComponent(getDeviceId());
+
+        // Читання теж має обмеження часу. Wi-Fi у цеху вміє прийняти з'єднання
+        // і не відповісти нічого: без таймауту застосунок назавжди лишався б
+        // на «Завантаження бази ЗІП…».
+        const READ_TIMEOUT_MS = 20000;      // каталог на 250 позицій читається довше за запис
+        const REPORT_TIMEOUT_MS = 60000;    // звіт ще й формується та надсилається
+
+        const apiGet = async (action, timeoutMs) => {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs || READ_TIMEOUT_MS);
+            try {
+                const response = await fetch(GOOGLE_SCRIPT_URL + '?action=' + action + authQuery(),
+                                             { redirect: 'follow', signal: controller.signal });
+                return await response.json();
+            } finally {
+                clearTimeout(timer);
+            }
+        };
+
+        // --- Локальне розблокування без мережі ---
+        // На пристрої зберігається не PIN, а повільно обчислений перевірник.
+        // Це дає змогу відкрити застосунок у підвалі; справжній бар'єр —
+        // токен, який перевіряє сервер під час запису.
+        const OFFLINE_UNLOCK_ENABLED = true;
+        const UNLOCK_KEY = 'zipOfflineUnlockV1';
+        const UNLOCK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;   // не довше тижня від останнього входу онлайн
+        const UNLOCK_ITERATIONS = 150000;
+        const OFFLINE_PERMISSIONS = ['registerUsage', 'registerRestock', 'registerInventory'];
+        const OFFLINE_SESSION_MS = 12 * 60 * 60 * 1000;
+
+        const toHex = (buffer) => Array.from(new Uint8Array(buffer))
+            .map(byte => byte.toString(16).padStart(2, '0')).join('');
+
+        const derivePinHash = async (pin, saltHex) => {
+            const salt = Uint8Array.from(saltHex.match(/.{2}/g).map(pair => parseInt(pair, 16)));
+            const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+            const bits = await crypto.subtle.deriveBits(
+                { name: 'PBKDF2', salt, iterations: UNLOCK_ITERATIONS, hash: 'SHA-256' }, key, 256);
+            return toHex(bits);
+        };
+
+        const saveOfflineUnlock = async (pin, data) => {
+            if (!OFFLINE_UNLOCK_ENABLED || !window.crypto || !crypto.subtle) return;
+            try {
+                const salt = toHex(crypto.getRandomValues(new Uint8Array(16)));
+                localStorage.setItem(UNLOCK_KEY, JSON.stringify({
+                    salt, hash: await derivePinHash(pin, salt), verifiedAt: Date.now(),
+                    name: data.name, shortName: data.shortName,
+                    roles: data.roles || [], permissions: data.permissions || []
+                }));
+            } catch (e) { /* без крипто-API просто не буде офлайн-входу */ }
+        };
+
+        const tryOfflineUnlock = async (pin) => {
+            if (!OFFLINE_UNLOCK_ENABLED || !window.crypto || !crypto.subtle) return null;
+            let record = null;
+            try { record = JSON.parse(localStorage.getItem(UNLOCK_KEY) || 'null'); } catch (e) { return null; }
+            if (!record || !record.salt) return null;
+            if (Date.now() - record.verifiedAt > UNLOCK_MAX_AGE_MS) return null;
+            try {
+                return (await derivePinHash(pin, record.salt)) === record.hash ? record : null;
+            } catch (e) { return null; }
+        };
+
+        // --- Вхід за PIN ---
+        const showLogin = (message) => {
+            const overlay = document.getElementById('loginOverlay');
+            const error = document.getElementById('loginError');
+            error.textContent = message || '';
+            error.classList.toggle('hidden', !message);
+            document.getElementById('pinInput').value = '';
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+            setTimeout(() => document.getElementById('pinInput').focus(), 100);
+        };
+
+        const hideLogin = () => {
+            const overlay = document.getElementById('loginOverlay');
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
+        };
+
+        const applyPermissions = () => {
+            document.getElementById('sessionName').textContent = session ? session.name : '—';
+            document.getElementById('sessionRole').textContent = session
+                ? ((session.roles || []).join(', ') + (session.offline ? ' · офлайн-режим' : ''))
+                : '';
+            document.getElementById('reportBtn').classList.toggle('hidden', !can('forceReport'));
+            document.querySelectorAll('#operationSwitch .op-btn').forEach(btn => {
+                btn.classList.toggle('hidden', !can(btn.dataset.op));
+            });
+        };
+
+        const doLogin = async () => {
+            const input = document.getElementById('pinInput');
+            const button = document.getElementById('loginBtn');
+            const pin = input.value.trim();
+            if (!pin) { showLogin('Введіть PIN'); return; }
+
+            const original = button.innerHTML;
+            button.innerHTML = '<div class="loader w-5 h-5 border-white"></div>';
+            button.disabled = true;
+            try {
+                const data = await apiPost({ action: 'login', pin: pin, deviceId: getDeviceId() });
+                if (data && data.success) {
+                    saveSession({
+                        token: data.token, name: data.name, shortName: data.shortName,
+                        roles: data.roles, permissions: data.permissions, expiresAt: data.expiresAt
+                    });
+                    input.value = '';
+                    hideLogin();
+                    applyPermissions();
+                    startIdleWatch();
+                    // Похідну від PIN рахуємо у фоні: 150 000 ітерацій — це відчутна пауза,
+                    // а користувач не має її чекати, щоб увійти
+                    saveOfflineUnlock(pin, data);
+                    flushOutbox();
+                    fetchData();
+                } else {
+                    showLogin((data && data.error) || 'Невірний PIN');
+                }
+            } catch (e) {
+                // Сервер недоступний — пробуємо локальне розблокування
+                const record = await tryOfflineUnlock(pin);
+                if (!record) {
+                    showLogin('Немає зв’язку. Локальний вхід недоступний — спершу увійдіть один раз онлайн.');
+                    return;
+                }
+                saveSession({
+                    token: '', name: record.name, shortName: record.shortName, roles: record.roles,
+                    permissions: (record.permissions || []).filter(p => OFFLINE_PERMISSIONS.indexOf(p) !== -1),
+                    expiresAt: Date.now() + OFFLINE_SESSION_MS, offline: true
+                });
+                input.value = '';
+                hideLogin();
+                applyPermissions();
+                startIdleWatch();
+                fetchData();
+                showToast('Офлайн-режим: записи чекатимуть на зв’язок');
+            } finally {
+                button.innerHTML = original;
+                button.disabled = false;
+            }
+        };
+
+        const handleAuthFailure = (message) => {
+            // Відповідь могла прилетіти вже після виходу — тоді на екрані входу
+            // вже написана справжня причина, і затирати її не можна
+            if (!session) return;
+            clearSession();
+            applyPermissions();
+            showLogin(message || 'Сесію завершено. Увійдіть за PIN.');
+        };
+
+        // --- Черга операцій (outbox) ---
+        // Кожна операція спершу лягає в localStorage і лише потім вирушає на сервер.
+        // Тому нічого не губиться, навіть якщо вкладку закрили в момент запиту.
+        const OUTBOX_KEY = 'zipOutboxV1';
+        const OUTBOX_DONE_TTL_MS = 24 * 60 * 60 * 1000;   // «надіслані» лишаються добу — щоб було видно
+        const SENDING_STUCK_MS = 2 * 60 * 1000;           // «в польоті» довше двох хвилин = вкладку вбили
+        const BACKOFF_MS = [5000, 15000, 60000, 300000];
+        const SYNC_INTERVAL_MS = 30000;
+        // Ці відповіді сервера повторювати немає сенсу — потрібне рішення людини
+        const PERMANENT_CODES = ['FORBIDDEN', 'NOT_FOUND', 'BAD_TARGET', 'NOT_COUNTED',
+                                 'OVERDRAW', 'ALREADY_CANCELLED', 'TOO_LATE', 'AMBIGUOUS',
+                                 'BAD_QUANTITY'];
+
+        let syncing = false;
+
+        // --- Журнал подій ---
+        // Три потоки: технічні помилки, стан застосунку і незавершені операції.
+        // Події буферяться на пристрої й вирушають пачкою — щоб діагностика
+        // не перетворилась на запит по кожному руху пальця.
+        const APP_VERSION = 'zip-app-2026-08-23';
+        const EVENT_KEY = 'zipEventsV1';
+        const EVENT_CAP = 60;              // більше не тримаємо: це діагностика, не облік
+        const EVENT_BATCH = 20;
+        const EVENT_FLUSH_MS = 120000;
+        let eventsSending = false;
+
+        const readEvents = () => {
+            try {
+                const stored = JSON.parse(localStorage.getItem(EVENT_KEY) || '[]');
+                return Array.isArray(stored) ? stored : [];
+            } catch (e) { return []; }
+        };
+
+        const logEvent = (kind, event, details, position) => {
+            try {
+                const list = readEvents();
+                list.push({
+                    kind: kind, event: event,
+                    details: String(details === undefined || details === null ? '' : details).slice(0, 500),
+                    position: position || '',
+                    timestamp: new Date().toISOString(),
+                    version: APP_VERSION
+                });
+                // Переповнення губимо з найстаріших: свіжа помилка цінніша за вчорашню
+                localStorage.setItem(EVENT_KEY, JSON.stringify(list.slice(-EVENT_CAP)));
+            } catch (e) { /* журнал подій ніколи не має ламати роботу */ }
+        };
+
+        const flushEvents = async () => {
+            if (eventsSending) return;
+            const list = readEvents();
+            if (!list.length) return;
+            eventsSending = true;
+            const batch = list.slice(0, EVENT_BATCH);
+            try {
+                const result = await apiPost({
+                    action: 'logEvents', entries: batch,
+                    token: session ? session.token : '', deviceId: getDeviceId()
+                });
+                if (result && result.success && !result.throttled) {
+                    // Видаляємо саме надіслані: за час запиту могли додатись нові
+                    const rest = readEvents().filter(item => batch.indexOf(item) === -1 &&
+                        !batch.some(sent => sent.timestamp === item.timestamp && sent.event === item.event));
+                    localStorage.setItem(EVENT_KEY, JSON.stringify(rest));
+                }
+            } catch (e) {
+                // Немає зв'язку — події почекають у буфері
+            } finally {
+                eventsSending = false;
+            }
+        };
+
+        const readOutbox = () => {
+            try {
+                const stored = JSON.parse(localStorage.getItem(OUTBOX_KEY) || 'null');
+                if (stored && stored.items) return stored;
+            } catch (e) { /* зіпсований запис — починаємо з порожньої черги */ }
+            return { version: 1, items: {} };
+        };
+
+        // Читаємо-зливаємо-пишемо: дві вкладки не затирають записи одна одної
+        const updateOutbox = (mutate) => {
+            const box = readOutbox();
+            const result = mutate(box.items);
+            localStorage.setItem(OUTBOX_KEY, JSON.stringify(box));
+            updateNetworkStatus();
+            return result;
+        };
+
+        const outboxItem = (opId) => readOutbox().items[opId] || null;
+
+        const patchItem = (opId, patch) => updateOutbox(items => {
+            if (items[opId]) Object.assign(items[opId], patch);
+            return items[opId];
+        });
+
+        const removeItem = (opId) => updateOutbox(items => { delete items[opId]; });
+
+        const outboxList = () => Object.keys(readOutbox().items)
+            .map(opId => readOutbox().items[opId])
+            .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+
+        const outboxCounts = () => {
+            const counts = { pending: 0, sending: 0, failed: 0, done: 0 };
+            outboxList().forEach(item => { counts[item.status] = (counts[item.status] || 0) + 1; });
+            counts.unsent = counts.pending + counts.sending;
+            return counts;
+        };
+
+        // Позиції з невідправленими операціями — щоб позначити картки
+        const pendingPositions = () => {
+            const keys = {};
+            outboxList().forEach(item => {
+                if (item.status === 'done') return;
+                keys[item.payload.sheetName + '|' + item.payload.row] = true;
+            });
+            return keys;
+        };
+
+        const pruneOutbox = () => updateOutbox(items => {
+            const now = Date.now();
+            Object.keys(items).forEach(opId => {
+                const item = items[opId];
+                if (item.status === 'done' && now - (item.syncedAt || 0) > OUTBOX_DONE_TTL_MS) {
+                    delete items[opId];
+                } else if (item.status === 'sending' && now - (item.sendingAt || 0) > SENDING_STUCK_MS) {
+                    // Застрягло: повертаємо в чергу. Дубля не буде — сервер відсіє за ідентифікатором
+                    item.status = 'pending';
+                    item.nextAttemptAt = 0;   // відповіді так і не було — пробуємо одразу
+                    item.lastError = 'Відправку перервано — повторюємо';
+                }
+            });
+        });
+
+        const enqueueOperation = (payload) => {
+            const createdAt = payload.timestamp || new Date().toISOString();
+            const opId = createdAt + '-' + getDeviceId().slice(0, 8) + '-' + Math.random().toString(36).slice(2, 6);
+            const item = {
+                opId, createdAt,
+                payload: Object.assign({}, payload, { timestamp: createdAt }),
+                status: 'pending', attempts: 0, nextAttemptAt: 0,
+                lastError: '', code: '', syncedAt: null, serverStock: null, response: null
+            };
+            updateOutbox(items => { items[opId] = item; });
+            return item;
+        };
+
+        /** Одна спроба відправки. Повертає 'done' | 'failed' | 'pending' | 'auth'. */
+        const sendItem = async (opId) => {
+            const item = outboxItem(opId);
+            if (!item || item.status === 'done') return 'done';
+
+            if (!session || !session.token) {
+                patchItem(opId, { status: 'pending', lastError: 'Потрібен вхід онлайн' });
+                return 'auth';
+            }
+
+            patchItem(opId, { status: 'sending', sendingAt: Date.now() });
+            try {
+                const result = await apiPost(Object.assign({}, item.payload, {
+                    token: session.token, deviceId: getDeviceId()
+                }));
+
+                if (result && result.success) {
+                    patchItem(opId, {
+                        status: 'done', syncedAt: Date.now(), lastError: '', code: '',
+                        serverStock: (typeof result.newStock === 'number') ? result.newStock : null,
+                        response: result
+                    });
+                    return 'done';
+                }
+
+                const code = (result && result.code) || '';
+                if (code === 'AUTH') {
+                    patchItem(opId, { status: 'pending', lastError: 'Сесія завершилась' });
+                    return 'auth';
+                }
+                if (PERMANENT_CODES.indexOf(code) !== -1) {
+                    patchItem(opId, {
+                        status: 'failed', code: code,
+                        lastError: (result && result.error) || 'Сервер відхилив запис',
+                        response: result
+                    });
+                    logEvent('error', 'sync.rejected', code + ': ' + ((result && result.error) || ''),
+                        item.payload.sheetName + ' · ' + item.payload.model);
+                    return 'failed';
+                }
+                return retryLater(item, (result && result.error) || 'Помилка сервера', 'server');
+            } catch (e) {
+                return retryLater(item, e && e.name === 'AbortError'
+                    ? 'Сервер не відповів вчасно' : 'Немає зв’язку', 'network');
+            }
+        };
+
+        // Пауза між спробами має сенс, поки причина — мовчання мережі.
+        // Щойно зв'язок повернувся (подія online, перезавантаження, ручна кнопка) —
+        // чекати далі немає підстав, тому таймери скидаємо, лічильник спроб лишаємо.
+        const resetBackoff = () => updateOutbox(items => {
+            Object.keys(items).forEach(opId => {
+                if (items[opId].status === 'pending') items[opId].nextAttemptAt = 0;
+            });
+        });
+
+        // kind розрізняє дві різні біди з однаковим наслідком «спробуємо ще раз»:
+        // мережі немає — чекаємо мовчки; сервер відповів помилкою — це треба показати
+        const retryLater = (item, error, kind) => {
+            const attempts = (item.attempts || 0) + 1;
+            const delay = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
+            // Одна невдача — це мережа. Три поспіль — це вже привід подивитись.
+            if (attempts === 3) {
+                logEvent('error', 'sync.stuck', 'спроб: 3, причина: ' + error,
+                    item.payload.sheetName + ' · ' + item.payload.model);
+            }
+            patchItem(item.opId, {
+                status: 'pending', attempts, nextAttemptAt: Date.now() + delay,
+                lastError: error, lastErrorKind: kind || 'network'
+            });
+            return 'pending';
+        };
+
+        /** Відправляє чергу по одному запису, зберігаючи порядок. */
+        const flushOutbox = async () => {
+            if (syncing) return;
+            syncing = true;
+            updateNetworkStatus();
+            try {
+                pruneOutbox();
+                let sent = 0;
+                for (const item of outboxList()) {
+                    if (item.status !== 'pending') continue;
+                    if ((item.nextAttemptAt || 0) > Date.now()) continue;
+
+                    const outcome = await sendItem(item.opId);
+                    if (outcome === 'done') sent++;
+                    if (outcome === 'auth') {
+                        if (session && session.token) {
+                            handleAuthFailure('Сесія завершилась — увійдіть, щоб надіслати збережені записи');
+                        } else if (navigator.onLine) {
+                            showLogin('Зв’язок відновлено — увійдіть за PIN, щоб надіслати збережені записи');
+                        }
+                        break;
+                    }
+                    if (outcome === 'pending') break;   // немає зв'язку — далі немає сенсу
+                }
+
+                const counts = outboxCounts();
+                if (sent) {
+                    showToast(counts.failed
+                        ? `Надіслано ${sent}, не пройшло ${counts.failed} — відкрийте чергу`
+                        : `Надіслано ${sent} ${sent === 1 ? 'запис' : 'записів'}`);
+                    if (!counts.unsent) fetchData(true);
+                }
+            } finally {
+                syncing = false;
+                updateNetworkStatus();
+                flushEvents();
+            }
+        };
+
+        // --- Статус угорі екрана ---
         const updateNetworkStatus = () => {
             const dot = document.getElementById('statusDot');
             const text = document.getElementById('statusText');
-            const queue = JSON.parse(localStorage.getItem(OFFLINE_KEY) || '[]');
-            
-            if (!navigator.onLine) {
+            if (!dot || !text) return;
+
+            const counts = outboxCounts();
+            if (syncing) {
+                dot.className = 'status-dot syncing';
+                text.textContent = 'Синхронізація…';
+            } else if (counts.failed) {
                 dot.className = 'status-dot offline';
-                text.textContent = `Офлайн (${queue.length})`;
-            } else if (queue.length > 0) {
+                text.textContent = `Помилок ${counts.failed}`;
+            } else if (counts.unsent) {
+                dot.className = 'status-dot syncing';
+                text.textContent = `Черга ${counts.unsent}`;
+            } else if (!navigator.onLine) {
                 dot.className = 'status-dot offline';
-                text.textContent = `Черга (${queue.length})`;
+                text.textContent = 'Немає зв’язку';
             } else {
                 dot.className = 'status-dot online';
-                text.textContent = 'Онлайн';
+                text.textContent = session && session.offline ? 'Офлайн-режим' : 'Онлайн';
             }
         };
 
-        const saveToOfflineQueue = (data) => {
-            const queue = JSON.parse(localStorage.getItem(OFFLINE_KEY) || '[]');
-            queue.push(data);
-            localStorage.setItem(OFFLINE_KEY, JSON.stringify(queue));
-            updateNetworkStatus();
+        const showToast = (message) => {
+            const toast = document.createElement('div');
+            toast.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg z-[3000] font-bold text-sm transition-opacity duration-300';
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 2500);
         };
 
-        const processOfflineQueue = async () => {
-            const queue = JSON.parse(localStorage.getItem(OFFLINE_KEY) || '[]');
-            if (queue.length === 0 || !navigator.onLine) return;
+        // Перенос зі старої черги, якщо на пристрої лишилися незакінчені записи
+        const migrateLegacyQueue = () => {
+            let legacy = [];
+            try { legacy = JSON.parse(localStorage.getItem(OFFLINE_KEY) || '[]'); } catch (e) { legacy = []; }
+            if (!legacy.length) return;
+            legacy.forEach(payload => enqueueOperation(payload));
+            localStorage.removeItem(OFFLINE_KEY);
+        };
 
-            const statusDot = document.getElementById('statusDot');
-            statusDot.className = 'status-dot syncing';
-            document.getElementById('statusText').textContent = 'Синхронізація...';
+        // --- Панель черги ---
+        const QUEUE_STATUS = {
+            pending: { label: 'очікує', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+            sending: { label: 'відправляється', cls: 'bg-blue-100 text-blue-800 border-blue-200' },
+            failed:  { label: 'помилка', cls: 'bg-red-100 text-red-800 border-red-200' },
+            done:    { label: 'надіслано', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' }
+        };
 
-            const newQueue = [];
-            for (const item of queue) {
-                try {
-                    await fetch(GOOGLE_SCRIPT_URL, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(item)
-                    });
-                } catch (e) {
-                    newQueue.push(item);
+        const operationLabel = (action) => (OPERATION_UI[action] || {}).short ||
+            ({ registerUsage: 'Видача', registerRestock: 'Поповнення', registerInventory: 'Інвентаризація' }[action] || action);
+
+        const renderQueue = () => {
+            const list = document.getElementById('queueList');
+            const summary = document.getElementById('queueSummary');
+            if (!list) return;
+
+            const items = outboxList().reverse();
+            const counts = outboxCounts();
+            summary.textContent = items.length
+                ? `Очікують: ${counts.unsent} · помилок: ${counts.failed} · надіслано за добу: ${counts.done}`
+                : 'Черга порожня — усе надіслано';
+
+            list.innerHTML = '';
+            items.forEach(item => {
+                const status = QUEUE_STATUS[item.status] || QUEUE_STATUS.pending;
+                const card = document.createElement('div');
+                card.className = 'border border-gray-200 rounded-xl p-3 ' + (item.status === 'done' ? 'opacity-60' : '');
+                card.innerHTML = `
+                    <div class="flex justify-between items-start gap-2">
+                        <div class="min-w-0">
+                            <div class="font-bold text-gray-900 truncate">${item.payload.model}</div>
+                            <div class="text-xs text-muted">${operationLabel(item.payload.action)} · ${item.payload.quantity} шт · ${new Date(item.createdAt).toLocaleString('uk-UA')}</div>
+                        </div>
+                        <span class="flex-shrink-0 text-xs font-bold px-2 py-1 rounded border ${status.cls}">${status.label}</span>
+                    </div>
+                    ${item.lastError ? `<div class="text-xs text-red-700 mt-2">${item.lastError}</div>` : ''}
+                `;
+
+                if (item.status !== 'done') {
+                    const actions = document.createElement('div');
+                    actions.className = 'flex gap-2 mt-3';
+
+                    if (item.status === 'failed') {
+                        const fix = document.createElement('button');
+                        fix.className = 'flex-1 text-sm font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg py-2';
+                        fix.textContent = 'Виправити';
+                        fix.onclick = async () => { await resolveFailedItem(item.opId); renderQueue(); };
+                        actions.appendChild(fix);
+                    } else {
+                        const retry = document.createElement('button');
+                        retry.className = 'flex-1 text-sm font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg py-2';
+                        retry.textContent = 'Надіслати';
+                        retry.onclick = async () => { patchItem(item.opId, { nextAttemptAt: 0 }); await sendItem(item.opId); renderQueue(); };
+                        actions.appendChild(retry);
+                    }
+
+                    const drop = document.createElement('button');
+                    drop.className = 'text-sm font-bold text-gray-600 bg-gray-100 border border-gray-200 rounded-lg py-2 px-3';
+                    drop.textContent = 'Видалити';
+                    drop.onclick = async () => {
+                        const go = await showCustomDialog(`Видалити запис «${item.payload.model}, ${item.payload.quantity} шт»?\n\nВін не потрапить у журнал.`, true);
+                        if (go) {
+                            logEvent('abandoned', 'op.queueDropped',
+                                operationLabel(item.payload.action) + ', ' + item.payload.quantity +
+                                ' шт, причина відмови: ' + (item.lastError || '—'),
+                                item.payload.sheetName + ' · ' + item.payload.model);
+                            removeItem(item.opId); renderQueue();
+                        }
+                    };
+                    actions.appendChild(drop);
+                    card.appendChild(actions);
                 }
-            }
+                list.appendChild(card);
+            });
+        };
 
-            localStorage.setItem(OFFLINE_KEY, JSON.stringify(newQueue));
-            updateNetworkStatus();
-            
-            if (newQueue.length === 0) {
-                fetchData(true);
-            }
+        const openQueuePanel = () => {
+            renderQueue();
+            const overlay = document.getElementById('queueOverlay');
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+            flushOutbox().then(renderQueue);
+        };
+
+        const closeQueuePanel = () => {
+            const overlay = document.getElementById('queueOverlay');
+            overlay.classList.add('hidden');
+            overlay.classList.remove('flex');
         };
 
         // --- Отримання даних ---
@@ -465,23 +1136,44 @@
                     return;
                 }
 
-                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=getInventory");
-                const data = await response.json();
-                
+                const data = await apiGet('getInventory');
+
+                if (data && data.code === 'AUTH') { handleAuthFailure(); return; }
+
                 if (data && data.success) {
                     allData = data.categories;
+                    peopleLists = { controllers: data.controllers || [], employees: data.employees || [] };
+                    if (data.session && session) {
+                        // Роль могли змінити в довіднику — оновлюємо права щозавантаження
+                        saveSession(Object.assign({}, session, {
+                            name: data.session.name, permissions: data.session.permissions
+                        }));
+                        applyPermissions();
+                    }
                     localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
+                    localStorage.setItem(PEOPLE_KEY, JSON.stringify(peopleLists));
                     renderState();
                 } else {
                     throw new Error("Помилка формату даних");
                 }
             } catch (error) {
                 console.error("Fetch error:", error);
+                const timedOut = error && error.name === 'AbortError';
+                logEvent('error', timedOut ? 'error.readTimeout' : 'error.readFailed',
+                    'getInventory: ' + (timedOut ? READ_TIMEOUT_MS + ' мс без відповіді'
+                                                 : (error && error.message) || String(error)));
                 const cached = localStorage.getItem(CACHE_KEY);
                 if (cached) {
                     allData = JSON.parse(cached);
+                    if (!silent) customAlert(timedOut
+                        ? 'Сервер не відповів вчасно.\nПоказано збережену базу — залишки можуть бути застарілі.'
+                        : 'Не вдалося оновити базу.\nПоказано збережену — залишки можуть бути застарілі.');
                 } else {
-                    allData = MOCK_DATA; 
+                    // Показувати вигадані залишки на складі не можна: краще чесна відмова
+                    allData = [];
+                    if (!silent) customAlert(timedOut
+                        ? 'Сервер не відповідає, а бази на цьому пристрої ще немає.\nСпробуйте ще раз, коли буде зв’язок.'
+                        : 'Не вдалося завантажити базу, а збереженої копії на пристрої ще немає.\nПеревірте зв’язок і спробуйте ще раз.');
                 }
                 renderState();
             } finally {
@@ -490,13 +1182,7 @@
         };
 
         const fetchHistory = async (onlyToday = false) => {
-            const mechanic = document.getElementById('employeeSelect').value;
-            if (onlyToday && !mechanic) {
-                customAlert("Оберіть своє ім'я у списку зверху, щоб побачити ваші записи!");
-                document.getElementById('employeeSelect').focus();
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-                return;
-            }
+            if (!session) { showLogin(); return; }
 
             appState.filterHistoryToday = onlyToday;
             const loader = document.getElementById('loadingState');
@@ -511,9 +1197,12 @@
             try {
                 if (!navigator.onLine) throw new Error("Offline");
                 
-                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=getHistory");
-                const data = await response.json();
-                
+                // За «сьогодні» просимо конкретну дату: інакше при активній роботі
+                // свіжі записи випадають за межу останніх 100
+                const data = await apiGet('getHistory' + (onlyToday ? '&date=' + localDate() : ''));
+
+                if (data && data.code === 'AUTH') { handleAuthFailure(); return; }
+
                 if (data && data.success) {
                     historyData = data.history;
                 } else {
@@ -521,6 +1210,10 @@
                 }
             } catch (error) {
                 console.warn("Помилка або офлайн, показуємо порожній список", error);
+                if (navigator.onLine) {
+                    logEvent('error', error && error.name === 'AbortError' ? 'error.readTimeout' : 'error.readFailed',
+                        'getHistory: ' + ((error && error.message) || String(error)));
+                }
                 historyData = [];
             } finally {
                 loader.classList.add('hidden');
@@ -530,15 +1223,11 @@
         };
 
         const forceSendReport = async () => {
-            const pwd = await showPasswordDialog();
-            if (pwd === null) return; // Користувач натиснув "Скасувати"
-            
-            if (pwd !== '5588') {
-                customAlert("❌ Невірний пароль!");
-                return;
-            }
+            if (!session) { showLogin(); return; }
+            if (!can('forceReport')) { customAlert('Ваша роль не дозволяє надсилати план закупки.'); return; }
 
-            const confirm = await showCustomDialog("Сформувати та відправити актуальний план закупки запчастин на email головного інженера?", true);
+            const confirm = await showCustomDialog(
+                'Надіслати звіт на пошту?\n\nУ ньому: що потрібно замовити, що потребує інвентаризації, від’ємні залишки, надлишок і рух за тиждень.', true);
             if (!confirm) return;
 
             const loader = document.getElementById('loadingState');
@@ -554,12 +1243,20 @@
                 if (!navigator.onLine) {
                     throw new Error("Offline");
                 }
-                const response = await fetch(GOOGLE_SCRIPT_URL + "?action=forceReport");
-                const data = await response.json();
+                const data = await apiGet('forceReport', REPORT_TIMEOUT_MS);
                 if (data && data.success) {
-                    customAlert("✅ План закупки успішно відправлено!");
+                    const c = data.counts;
+                    customAlert(c
+                        ? `✅ Звіт надіслано.\n\nДо замовлення: ${c.deficit} (${c.orderTotal} од.)\nПотребує інвентаризації: ${c.notCounted}\nВід’ємний залишок: ${c.negative}\nНадлишок: ${c.excess}`
+                        : '✅ Звіт надіслано.');
+                } else if (data && data.code === 'AUTH') {
+                    handleAuthFailure();
+                } else {
+                    customAlert('❌ ' + ((data && data.error) || 'Не вдалося надіслати план'));
                 }
             } catch (error) {
+                logEvent('error', error && error.name === 'AbortError' ? 'error.readTimeout' : 'error.readFailed',
+                    'forceReport: ' + ((error && error.message) || String(error)));
                 customAlert("❌ Помилка відправки. Перевірте зв'язок з інтернетом.");
             } finally {
                 loader.classList.add('hidden');
@@ -587,9 +1284,10 @@
                 backBtnContainer.classList.add('hidden'); 
                 
                 const allItems = allData.flatMap(c => c.items);
-                const filtered = allItems.filter(item => 
-                    (item.model && item.model.toLowerCase().includes(searchTerm)) || 
+                const filtered = allItems.filter(item =>
+                    (item.model && item.model.toLowerCase().includes(searchTerm)) ||
                     (item.equipment && item.equipment.toLowerCase().includes(searchTerm)) ||
+                    (item.storage && item.storage.toLowerCase().includes(searchTerm)) ||
                     (item.no && String(item.no).toLowerCase().includes(searchTerm))
                 );
                 
@@ -670,8 +1368,11 @@
                 return;
             }
 
+            const pending = pendingPositions();
             items.forEach(item => {
-                const isLowStock = parseFloat(item.currentStock) <= parseFloat(item.minStock);
+                const awaitingSync = !!pending[item.sheetName + '|' + item.row];
+                const notCounted = item.hasStock === false;
+                const isLowStock = !notCounted && parseFloat(item.currentStock) <= parseFloat(item.minStock);
                 
                 const card = document.createElement('div');
                 card.className = `inventory-item p-4 rounded-xl cursor-pointer flex flex-col justify-between ${isLowStock ? 'low-stock' : ''}`;
@@ -689,6 +1390,8 @@
                         <p class="text-sm text-gray-600 mb-2 mt-1" title="${item.equipment}">
                             <span class="font-medium text-gray-500">Обладнання:</span> ${item.equipment}
                         </p>
+                        ${item.storage ? `<p class="text-xs font-bold text-slate-700 bg-slate-100 border border-slate-200 inline-block px-2 py-0.5 rounded mb-2">📍 ${item.storage}</p>` : ''}
+                        ${awaitingSync ? '<p class="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 inline-block px-2 py-0.5 rounded mb-2 ml-1">⏳ очікує відправки</p>' : ''}
                         ${(item.supplierName || item.supplierPhone) ? `
                         <div class="text-xs text-indigo-700 bg-indigo-50 p-2 rounded border border-indigo-100 mb-2">
                             <span class="font-bold">Постачальник:</span> ${item.supplierName || '—'} ${item.supplierPhone ? `<br>📞 ${item.supplierPhone}` : ''}
@@ -699,7 +1402,8 @@
                             Мін. запас: <span class="font-semibold text-gray-700">${item.minStock}</span>
                         </div>
                         <div class="text-sm text-right">
-                            Залишок: <span class="font-bold text-lg ${isLowStock ? 'text-red-600' : 'text-gray-900'}">${item.currentStock}</span>
+                            Залишок: <span class="font-bold text-lg ${isLowStock ? 'text-red-600' : 'text-gray-900'}">${notCounted ? '—' : item.currentStock}</span>
+                            ${notCounted ? '<div class="text-xs text-amber-700 font-medium">не інвентаризовано</div>' : ''}
                         </div>
                     </div>
                 `;
@@ -707,22 +1411,39 @@
             });
         };
 
+        // Операції, які ще не дійшли до сервера, показуємо поруч із журналом —
+        // щоб механік бачив, що вже списав, навіть без мережі
+        const localHistoryRecords = () => outboxList()
+            .filter(item => item.status !== 'done')
+            .reverse()
+            .map(item => ({
+                id: item.opId, local: true, localStatus: item.status, lastError: item.lastError,
+                date: item.payload.date,
+                time: new Date(item.createdAt).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }),
+                sheetName: item.payload.sheetName, model: item.payload.model,
+                actionType: operationLabel(item.payload.action),
+                controller: session ? session.name : '', usedBy: session ? session.name : '',
+                location: item.payload.location, quantity: item.payload.quantity,
+                cancelled: false, isCancellation: false
+            }));
+
         const renderHistoryList = () => {
             const container = document.getElementById('historyContainer');
             const titleEl = document.getElementById('historyTitle');
             container.innerHTML = '';
 
-            let filteredHistory = historyData;
+            let filteredHistory = localHistoryRecords().concat(historyData);
 
             if (appState.filterHistoryToday) {
                 titleEl.textContent = "Мої списання за сьогодні";
-                const mechanic = document.getElementById('employeeSelect').value;
-                const todayStr = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+                const mechanic = session ? session.name : '';
+                const todayStr = localDate();   // дата за місцевим часом, не за UTC
                 
-                filteredHistory = historyData.filter(record => {
+                filteredHistory = filteredHistory.filter(record => {
                     // Перевіряємо чи дата співпадає з сьогоднішньою (залежить від формату дати в GAS, але GAS має віддавати "YYYY-MM-DD" щоб було легко)
                     // Тому в GAS ми зберігаємо `payload.date`, яка приходить як `YYYY-MM-DD` від інпута `type="date"`
-                    return record.mechanic === mechanic && record.date.includes(todayStr);
+                    const person = (record.usedBy && record.usedBy !== '-') ? record.usedBy : record.controller;
+                    return person === mechanic && String(record.date).includes(todayStr);
                 });
             } else {
                 titleEl.textContent = "Історія рухів";
@@ -735,17 +1456,21 @@
 
             filteredHistory.forEach(record => {
                 const card = document.createElement('div');
-                card.className = 'card p-4 rounded-xl shadow-sm border border-gray-200';
+                card.className = 'card p-4 rounded-xl shadow-sm border ' +
+                    (record.local ? 'border-amber-300 bg-amber-50' : 'border-gray-200') +
+                    (record.cancelled ? ' opacity-60' : '');
                 card.innerHTML = `
                     <div class="flex justify-between items-start mb-2">
                         <div>
                             <span class="text-xs font-bold text-gray-500">${record.date} ${record.time || ''}</span>
-                            <h4 class="font-bold text-gray-900 mt-1">${record.model}</h4>
+                            <h4 class="font-bold text-gray-900 mt-1 ${record.cancelled ? 'line-through' : ''}">${record.model}</h4>
+                            ${record.cancelled ? '<span class="inline-block mt-1 text-xs font-bold text-red-700 bg-red-50 border border-red-100 px-2 py-0.5 rounded">скасовано</span>' : ''}
+                            ${record.local ? `<span class="inline-block mt-1 text-xs font-bold ${record.localStatus === 'failed' ? 'text-red-700 bg-red-50 border-red-200' : 'text-amber-800 bg-amber-100 border-amber-300'} border px-2 py-0.5 rounded">${record.localStatus === 'failed' ? 'не пройшло: ' + record.lastError : 'не надіслано'}</span>` : ''}
                         </div>
-                        <span class="bg-red-100 text-red-700 font-bold px-2 py-1 rounded text-sm whitespace-nowrap">- ${record.quantity} шт</span>
+                        <span class="${record.actionType === 'Поповнення' ? 'bg-emerald-100 text-emerald-700' : record.actionType === 'Інвентаризація' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'} font-bold px-2 py-1 rounded text-sm whitespace-nowrap">${record.actionType === 'Поповнення' ? '+' : record.actionType === 'Інвентаризація' ? '=' : '-'} ${record.quantity} шт</span>
                     </div>
                     <div class="text-sm text-gray-600 mb-1">
-                        <span class="font-medium text-gray-500">Хто:</span> ${record.mechanic}
+                        <span class="font-medium text-gray-500">Хто видав:</span> ${record.controller || '-'}${(record.usedBy && record.usedBy !== '-' && record.usedBy !== record.controller) ? ' → ' + record.usedBy : ''}
                     </div>
                     <div class="text-sm text-gray-600 mb-1">
                         <span class="font-medium text-gray-500">Де:</span> ${record.location}
@@ -754,8 +1479,67 @@
                         Категорія: ${record.sheetName}
                     </div>
                 `;
+
+                if (canCancelRecord(record)) {
+                    const button = document.createElement('button');
+                    button.className = 'mt-3 w-full text-sm font-bold text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg py-2 transition-colors';
+                    button.textContent = 'Скасувати операцію';
+                    button.onclick = () => cancelRecord(record, button);
+                    card.appendChild(button);
+                }
+
                 container.appendChild(card);
             });
+        };
+
+        // --- Скасування операції ---
+        // Рядок журналу не видаляється: сервер помічає початкову операцію
+        // скасованою і дописує окремий рядок «Скасування …»
+        const CANCEL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+        const canCancelRecord = (record) => {
+            if (record.local) return false;   // ще не в журналі — видаляється з черги
+            if (!session || !record.id || record.cancelled || record.isCancellation) return false;
+            if (record.actionType === 'Інвентаризація') return false;   // її скасовують новою інвентаризацією
+            if (!can('cancelOwn') && !can('cancelAny')) return false;
+
+            const mine = record.usedBy === session.name || record.controller === session.name;
+            if (!mine) return can('cancelAny');
+
+            const when = new Date(record.id).getTime();
+            if (!isNaN(when) && Date.now() - when > CANCEL_WINDOW_MS) return can('cancelAny');
+            return true;
+        };
+
+        const cancelRecord = async (record, button) => {
+            const confirmed = await showCustomDialog(
+                `Скасувати операцію?\n\n${record.actionType}: ${record.model}, ${record.quantity} шт\n${record.date} ${record.time || ''}\n\nЗалишок буде перерахований, а в журналі з’явиться рядок скасування.`, true);
+            if (!confirmed) return;
+
+            const original = button.textContent;
+            button.textContent = 'Скасовуємо…';
+            button.disabled = true;
+            try {
+                const result = await apiPost({
+                    action: 'cancelOperation', timestamp: record.id,
+                    sheetName: record.sheetName, model: record.model,
+                    token: session.token, deviceId: getDeviceId()
+                });
+                if (result && result.success) {
+                    customAlert('✅ Операцію скасовано. Новий залишок: ' + result.newStock + ' шт');
+                    await fetchData(true);
+                    await fetchHistory(appState.filterHistoryToday);
+                } else if (result && result.code === 'AUTH') {
+                    handleAuthFailure();
+                } else {
+                    customAlert('❌ ' + ((result && result.error) || 'Не вдалося скасувати операцію'));
+                }
+            } catch (e) {
+                customAlert('❌ Немає зв’язку — скасування можливе лише онлайн.');
+            } finally {
+                button.textContent = original;
+                button.disabled = false;
+            }
         };
 
         // --- Логіка пошуку та переходів ---
@@ -784,14 +1568,39 @@
         const modal = document.getElementById('usageModal');
         const modalContent = document.getElementById('usageModalContent');
 
+        const OPERATION_UI = {
+            registerUsage:     { qty: 'Кількість використано (шт):', loc: 'Де було використано:',  btn: 'Зареєструвати видачу',     usedBy: true,  toast: 'Успішно списано!' },
+            registerRestock:   { qty: 'Кількість надходження (шт):', loc: 'Примітка / накладна:',  btn: 'Зареєструвати поповнення', usedBy: false, toast: 'Поповнення записано!' },
+            registerInventory: { qty: 'Фактичний залишок (шт):',     loc: 'Примітка:',             btn: 'Зафіксувати залишок',      usedBy: false, toast: 'Залишок зафіксовано!' }
+        };
+
+        const setOperation = (operation) => {
+            currentOperation = operation;
+            const ui = OPERATION_UI[operation];
+            document.getElementById('qtyLabel').textContent = ui.qty;
+            document.getElementById('locationLabel').textContent = ui.loc;
+            document.getElementById('submitBtnText').textContent = ui.btn;
+            document.getElementById('usedByWrap').classList.toggle('hidden', !ui.usedBy);
+            document.getElementById('useQuantity').min = operation === 'registerInventory' ? 0 : 1;
+
+            document.querySelectorAll('#operationSwitch .op-btn').forEach(btn => {
+                const active = btn.dataset.op === operation;
+                btn.className = 'op-btn py-2 px-2 rounded-lg text-sm font-bold border transition-colors ' +
+                    (active ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-gray-100 text-gray-700 border-gray-200 hover:bg-gray-200') +
+                    // операції, недоступні ролі, лишаються прихованими
+                    (can(btn.dataset.op) ? '' : ' hidden');
+            });
+        };
+
+        document.getElementById('operationSwitch').addEventListener('click', (e) => {
+            const btn = e.target.closest('.op-btn');
+            if (btn) setOperation(btn.dataset.op);
+        });
+
         const openUsageModal = (item) => {
-            const mechanic = document.getElementById('employeeSelect').value;
-            if (!mechanic) {
-                customAlert("Будь ласка, оберіть ваше ім'я у списку зверху!");
-                document.getElementById('employeeSelect').focus();
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-                return;
-            }
+            if (!session) { showLogin(); return; }
+            const mechanic = session.name;
 
             currentSelectedItem = item;
             
@@ -799,11 +1608,18 @@
             document.getElementById('modalPartCategory').textContent = item.sheetName;
             document.getElementById('modalPartName').textContent = item.model;
             document.getElementById('modalPartEquipment').textContent = item.equipment;
-            document.getElementById('modalCurrentStock').textContent = `${item.currentStock} шт`;
+            document.getElementById('modalCurrentStock').textContent = item.hasStock === false ? 'не інвентаризовано' : `${item.currentStock} шт`;
+            document.getElementById('modalStorage').textContent = item.storage || 'не вказано';
+            document.getElementById('editStorageBtn').classList.toggle('hidden', !can('manageStorage'));
             
             document.getElementById('useQuantity').value = 1;
             document.getElementById('useLocation').value = item.equipment; // Дефолт
-            document.getElementById('useDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('useSerial').value = '';
+            document.getElementById('useDate').value = localDate();
+
+            // Типова операція — перша, дозволена роллю
+            setOperation(['registerUsage', 'registerInventory', 'registerRestock'].filter(can)[0] || 'registerUsage');
+            document.getElementById('usedByName').textContent = mechanic;
 
             modal.classList.remove('hidden');
             modal.classList.add('flex');
@@ -811,7 +1627,17 @@
             setTimeout(() => { modalContent.classList.remove('translate-y-full'); }, 10);
         };
 
-        const closeUsageModal = () => {
+        // reason відсутній = вікно закрила людина. Саме такі випадки цікаві:
+        // механік почав списання і передумав — а деталь міг забрати.
+        const closeUsageModal = (reason) => {
+            if (!reason && currentSelectedItem) {
+                const entered = parseFloat(document.getElementById('useQuantity').value);
+                if (isFinite(entered) && entered > 0) {
+                    logEvent('abandoned', 'op.abandoned',
+                        operationLabel(currentOperation) + ', ' + entered + ' шт',
+                        currentSelectedItem.sheetName + ' · ' + currentSelectedItem.model);
+                }
+            }
             modalContent.classList.add('translate-y-full');
             setTimeout(() => {
                 modal.classList.add('hidden');
@@ -820,111 +1646,354 @@
             }, 300);
         };
 
-        document.getElementById('closeUsageModalBtn').addEventListener('click', closeUsageModal);
+        // --- Адресне зберігання ---
+        document.getElementById('editStorageBtn').addEventListener('click', async () => {
+            if (!currentSelectedItem || !can('manageStorage')) return;
+            // Поки людина набирає адресу, вікно могло закритись (автовихід, дотик
+            // повз) і currentSelectedItem стати null — тримаємось за копію
+            const target = currentSelectedItem;
+
+            const value = await showPromptDialog(
+                `Місце зберігання для «${target.model}»:<br><span class="text-sm text-gray-500">Наприклад: Контейнер 1, стелаж B, полиця 3</span>`,
+                target.storage || 'Стелаж / полиця / комірка');
+            if (value === null) return;
+
+            try {
+                const result = await apiPost({
+                    action: 'setStorage',
+                    sheetName: target.sheetName,
+                    row: target.row,
+                    no: target.no,
+                    model: target.model,
+                    storage: value,
+                    token: session.token, deviceId: getDeviceId()
+                });
+                if (result && result.success) {
+                    target.storage = result.storage;
+                    document.getElementById('modalStorage').textContent = result.storage || 'не вказано';
+                    const category = allData.find(c => c.name === target.sheetName);
+                    const item = category && category.items.find(i => i.row === target.row);
+                    if (item) item.storage = result.storage;
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
+                    renderState();
+                } else if (result && result.code === 'AUTH') {
+                    handleAuthFailure();
+                } else {
+                    customAlert('❌ ' + ((result && result.error) || 'Не вдалося зберегти місце'));
+                }
+            } catch (e) {
+                customAlert(e && e.name === 'AbortError'
+                    ? '❌ Сервер не відповів вчасно. Місце зберігання не змінено.'
+                    : navigator.onLine
+                        ? '❌ Сервер відповів не тим, що очікували: ' + ((e && e.message) || e) +
+                          '\nМісце зберігання не змінено.'
+                        : '❌ Немає зв’язку — місце зберігання змінюється лише онлайн.');
+                logEvent('error', 'setStorage.failed', (e && e.message) || String(e),
+                    target.sheetName + ' · ' + target.model);
+            }
+        });
+
+        // Без обгортки сюди прилетів би об'єкт події й зійшов за reason —
+        // і закриття вручну перестало б вважатися незавершеною операцією
+        document.getElementById('closeUsageModalBtn').addEventListener('click', () => closeUsageModal());
         modal.addEventListener('click', (e) => { if (e.target === modal) closeUsageModal(); });
 
         // --- Відправка даних ---
+        /**
+         * Розбирає постійну відмову сервера разом із користувачем.
+         * Повертає true, якщо запис зрештою пройшов.
+         */
+        const resolveFailedItem = async (opId) => {
+            const item = outboxItem(opId);
+            if (!item) return false;
+
+            if (item.code === 'OVERDRAW') {
+                const available = Math.floor(Number(item.response && item.response.available) || 0);
+                const choice = await showChoiceDialog(item.lastError + '<br><br>Що робимо?',
+                    (available > 0 ? [{ key: 'limit', label: 'Списати наявні ' + available + ' шт', primary: true }] : [])
+                    .concat([{ key: 'reason', label: 'Списати понад залишок і пояснити' },
+                             { key: 'keep', label: 'Лишити в черзі' }]));
+
+                if (choice === 'limit') {
+                    patchItem(opId, { status: 'pending', attempts: 0, nextAttemptAt: 0,
+                        payload: Object.assign({}, item.payload, { quantity: available }) });
+                } else if (choice === 'reason') {
+                    const reason = await showPromptDialog(
+                        'Чому списується більше, ніж є на складі?', 'Наприклад: залишок у таблиці застарілий');
+                    if (!reason || reason.length < 3) {
+                        customAlert('Потрібне пояснення — без нього перевитрата не записується.');
+                        return false;
+                    }
+                    patchItem(opId, { status: 'pending', attempts: 0, nextAttemptAt: 0,
+                        payload: Object.assign({}, item.payload, { overdrawReason: reason }) });
+                } else {
+                    logEvent('abandoned', 'op.overdrawDeclined',
+                        'просив ' + item.payload.quantity + ', доступно ' + available,
+                        item.payload.sheetName + ' · ' + item.payload.model);
+                    return false;
+                }
+                return (await sendItem(opId)) === 'done';
+            }
+
+            if (item.code === 'NOT_COUNTED') {
+                if (!can('registerInventory')) {
+                    customAlert(item.lastError + '\n\nІнвентаризацію проводить zip.admin або admin.');
+                    return false;
+                }
+                const go = await showCustomDialog(item.lastError + '\n\nПровести інвентаризацію зараз?', true);
+                if (!go) {
+                    logEvent('abandoned', 'op.notCountedDeclined', 'від інвентаризації відмовились',
+                        item.payload.sheetName + ' · ' + item.payload.model);
+                }
+                if (go) {
+                    removeItem(opId);
+                    setOperation('registerInventory');
+                    document.getElementById('useQuantity').value = 0;
+                    document.getElementById('useQuantity').focus();
+                }
+                return false;
+            }
+
+            customAlert('❌ ' + item.lastError);
+            return false;
+        };
+
         document.getElementById('submitUsageBtn').addEventListener('click', async () => {
             if (!currentSelectedItem) return;
 
-            const mechanic = document.getElementById('employeeSelect').value;
             const quantity = parseFloat(document.getElementById('useQuantity').value);
+            // ЗІП рахують у штуках: «2,5 підшипника» — це описка
+            if (isFinite(quantity) && Math.floor(quantity) !== quantity) {
+                customAlert('Кількість вказують цілими штуками.\nВи ввели ' + quantity + '.');
+                return;
+            }
             const location = document.getElementById('useLocation').value.trim();
+            const serial = document.getElementById('useSerial').value.trim();
             const date = document.getElementById('useDate').value; // Формат "YYYY-MM-DD"
+            const isUsage = currentOperation === 'registerUsage';
 
-            if (!quantity || quantity <= 0) { customAlert("Введіть коректну кількість!"); return; }
-            if (!location) { customAlert("Вкажіть, де була використана деталь!"); return; }
+            if (!session) { showLogin(); return; }
+            if (!can(currentOperation)) { customAlert('Ваша роль не дозволяє цю операцію.'); return; }
 
-            const currentStock = parseFloat(currentSelectedItem.currentStock);
-            if (quantity > currentStock) {
-                const confirmOver = await showCustomDialog(`Увага!\nВи списуєте ${quantity} шт, але в залишку лише ${currentStock} шт. Продовжити?`, true);
-                if (!confirmOver) return;
+            if (!isFinite(quantity) || quantity < 0 || (quantity === 0 && currentOperation !== 'registerInventory')) {
+                customAlert("Введіть коректну кількість!"); return;
+            }
+            if (isUsage && !location) { customAlert("Вкажіть, де була використана деталь!"); return; }
+
+            // Без зв'язку сервер не підкаже про перевитрату — попереджаємо за кешованим залишком
+            if (isUsage && !navigator.onLine && currentSelectedItem.hasStock !== false) {
+                const cached = parseFloat(currentSelectedItem.currentStock);
+                if (isFinite(cached) && quantity > cached) {
+                    const go = await showCustomDialog(
+                        `Зв’язку немає, а за останніми даними на складі ${cached} шт — ви списуєте ${quantity}.\n\nЗапис збережеться, але сервер може його відхилити. Продовжити?`, true);
+                    if (!go) return;
+                }
             }
 
+            // «Хто видав» і «ким використано» сервер бере із сесії, тому не надсилаємо
             const payload = {
-                action: "registerUsage",
+                action: currentOperation,
                 sheetName: currentSelectedItem.sheetName,
+                // Рядок — лише підказка: позицію сервер упізнає за парою «№ + модель»
                 row: currentSelectedItem.row,
+                no: currentSelectedItem.no,
                 model: currentSelectedItem.model,
-                mechanic: mechanic,
                 quantity: quantity,
-                location: location,
-                date: date, 
+                location: location || '-',
+                serial: serial,
+                date: date,
+                // Час створення — він же ідентифікатор операції: повторна
+                // відправка з черги не спише вдруге
                 timestamp: new Date().toISOString()
             };
 
+            // Міняємо лише підпис: підміна innerHTML знищила б <span id="submitBtnText">,
+            // на який спирається setOperation()
             const btn = document.getElementById('submitUsageBtn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '<div class="loader w-5 h-5 mr-2 border-white border-top-transparent"></div> Зачекайте...';
+            const btnLabel = document.getElementById('submitBtnText');
+            btnLabel.textContent = 'Зачекайте…';
             btn.disabled = true;
 
             try {
-                if (!navigator.onLine) {
-                    throw new Error("Offline");
-                }
+                // Спершу в чергу — навіть онлайн. Якщо вкладку вб'ють у момент
+                // запиту, запис не зникне і піде при наступному запуску.
+                const item = enqueueOperation(payload);
+                const outcome = await sendItem(item.opId);
 
-                await fetch(GOOGLE_SCRIPT_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                
-                showSuccessAndClose();
-            } catch (e) {
-                saveToOfflineQueue(payload);
-                showSuccessAndClose(true);
+                if (outcome === 'done') {
+                    const answer = outboxItem(item.opId).response;
+                    // Позиція виявилась в іншому рядку — наш каталог застарів
+                    if (answer && answer.moved) fetchData(true);
+                    showSuccessAndClose(false, answer);
+                } else if (outcome === 'auth') {
+                    closeUsageModal('auth');
+                    handleAuthFailure();
+                } else if (outcome === 'failed') {
+                    if (await resolveFailedItem(item.opId)) {
+                        showSuccessAndClose(false, outboxItem(item.opId).response);
+                    }
+                } else {
+                    // Помилку сервера не можна видавати за відсутність мережі:
+                    // механік має бачити, що саме відповів сервер
+                    const queued = outboxItem(item.opId);
+                    closeUsageModal('queued');
+                    customAlert(queued && queued.lastErrorKind === 'server'
+                        ? '⚠️ Сервер відповів помилкою:\n' + queued.lastError +
+                          '\n\nЗапис збережено на пристрої — повторимо автоматично.'
+                        : 'Немає зв’язку.\nЗапис збережено на пристрої й надійде автоматично, щойно з’явиться мережа.');
+                }
             } finally {
-                btn.innerHTML = originalText;
+                // Операція могла змінитися під час запиту — підпис ставимо за поточною
+                btnLabel.textContent = OPERATION_UI[currentOperation].btn;
                 btn.disabled = false;
             }
         });
 
-        const showSuccessAndClose = (isOffline = false) => {
+        const showSuccessAndClose = (isOffline = false, result = null) => {
             if (currentSelectedItem) {
                 const qty = parseFloat(document.getElementById('useQuantity').value);
                 const categoryData = allData.find(c => c.name === currentSelectedItem.sheetName);
                 if (categoryData) {
                     const itemInArray = categoryData.items.find(i => i.row === currentSelectedItem.row);
                     if (itemInArray) {
-                        itemInArray.currentStock = (parseFloat(itemInArray.currentStock) - qty).toString();
+                        // Авторитетне значення — перерахований сервером залишок;
+                        // локальна арифметика лишається тільки для офлайну
+                        const before = parseFloat(itemInArray.currentStock) || 0;
+                        const local = currentOperation === 'registerUsage' ? before - qty
+                                    : currentOperation === 'registerRestock' ? before + qty
+                                    : qty;
+                        itemInArray.currentStock = String(
+                            (result && typeof result.newStock === 'number') ? result.newStock : local);
+                        itemInArray.hasStock = true;
                     }
                 }
                 localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
                 renderState();
             }
 
-            closeUsageModal();
+            closeUsageModal('done');
             
             if (isOffline) {
                 customAlert("Відсутній зв'язок.\nЗапис збережено в телефоні і буде відправлено автоматично при появі інтернету!");
             } else {
                 const toast = document.createElement('div');
                 toast.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-lg z-[3000] font-bold text-sm flex items-center transition-opacity duration-300';
-                toast.innerHTML = '<svg class="w-5 h-5 text-emerald-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Успішно списано!';
+                toast.innerHTML = '<svg class="w-5 h-5 text-emerald-400 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> ' + OPERATION_UI[currentOperation].toast;
                 document.body.appendChild(toast);
                 setTimeout(() => {
                     toast.style.opacity = '0';
                     setTimeout(() => toast.remove(), 300);
                 }, 2000);
             }
+
+            const gap = result && result.discrepancy;
+            if (gap && gap.delta !== null && gap.delta !== 0) {
+                setTimeout(() => customAlert(
+                    `Зафіксовано розбіжність:\nобліковий залишок ${gap.accounted}, фактичний ${gap.fact} (${gap.delta > 0 ? '+' : ''}${gap.delta}).\n\nЗапис додано в журнал, попередні операції збережено.`), 400);
+            } else if (result && result.warning) {
+                setTimeout(() => customAlert('⚠️ ' + result.warning), 400);
+            }
+        };
+
+        // --- Ярлики з маніфесту (?view=...) ---
+        const applyManifestShortcut = () => {
+            const view = new URLSearchParams(window.location.search).get('view');
+            if (!view) return;
+
+            // Прибираємо параметр з адреси, щоб він не спрацював повторно
+            history.replaceState(null, '', window.location.pathname);
+
+            if (view === 'history-today') {
+                fetchHistory(true);
+            } else if (view === 'history') {
+                fetchHistory(false);
+            } else if (view === 'search') {
+                document.getElementById('searchInput').focus();
+            }
+        };
+
+        // --- Service worker (встановлення на телефон + робота офлайн) ---
+        const registerServiceWorker = () => {
+            // Працює лише у безпечному контексті (https або localhost)
+            if (!navigator.serviceWorker || !window.isSecureContext) return;
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch((err) => {
+                    console.warn('Service worker не зареєстровано:', err);
+                });
+            });
         };
 
         // --- Ініціалізація ---
         document.addEventListener('DOMContentLoaded', () => {
             updateNetworkStatus();
+            registerServiceWorker();
             
-            const savedMechanic = localStorage.getItem('selectedMechanic');
-            if(savedMechanic) document.getElementById('employeeSelect').value = savedMechanic;
-            document.getElementById('employeeSelect').addEventListener('change', (e) => {
-                localStorage.setItem('selectedMechanic', e.target.value);
+            try { peopleLists = JSON.parse(localStorage.getItem(PEOPLE_KEY)) || peopleLists; } catch (e) { /* кеш зіпсовано — беремо запасний список */ }
+
+            // Сесія переживає перезавантаження: токен лежить у localStorage,
+            // тому PIN питаємо лише коли сесії немає або вона протермінована
+            session = loadSession();
+            applyPermissions();
+
+            document.getElementById('loginBtn').addEventListener('click', doLogin);
+            document.getElementById('pinInput').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') doLogin();
+            });
+            document.getElementById('logoutBtn').addEventListener('click', () => {
+                clearSession();
+                applyPermissions();
+                showLogin('Ви вийшли із застосунку');
             });
 
-            window.addEventListener('online', () => { updateNetworkStatus(); processOfflineQueue(); });
-            window.addEventListener('offline', updateNetworkStatus);
-            document.getElementById('networkStatusBtn').addEventListener('click', processOfflineQueue);
+            // Необроблена помилка на планшеті інакше лишається лише в консолі,
+            // якої ніхто в цеху не відкриє
+            window.addEventListener('error', (e) => {
+                logEvent('error', 'error.js',
+                    (e.message || 'помилка') + ' @ ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0));
+            });
+            window.addEventListener('unhandledrejection', (e) => {
+                const reason = e.reason;
+                logEvent('error', 'error.promise',
+                    (reason && (reason.message || reason.name)) || String(reason));
+            });
+            logEvent('tech', 'app.start', 'екран ' + screen.width + '×' + screen.height +
+                ', ' + (navigator.onLine ? 'онлайн' : 'офлайн') +
+                (window.matchMedia('(display-mode: standalone)').matches ? ', встановлений' : ', браузер'));
 
-            fetchData();
+            migrateLegacyQueue();
+            resetBackoff();   // сторінку щойно відкрили — це нова спроба, а не продовження старої
+            window.addEventListener('online', () => { updateNetworkStatus(); resetBackoff(); flushOutbox(); });
+            setInterval(flushEvents, EVENT_FLUSH_MS);
+            window.addEventListener('offline', updateNetworkStatus);
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) { flushEvents(); return; }   // йдемо з екрана — саме час віддати накопичене
+                flushOutbox();
+            });
+            setInterval(() => { if (outboxCounts().pending) flushOutbox(); }, SYNC_INTERVAL_MS);
+
+            document.getElementById('networkStatusBtn').addEventListener('click', openQueuePanel);
+            document.getElementById('closeQueueBtn').addEventListener('click', closeQueuePanel);
+            document.getElementById('queueOverlay').addEventListener('click', (e) => {
+                if (e.target === document.getElementById('queueOverlay')) closeQueuePanel();
+            });
+            document.getElementById('queueFlushBtn').addEventListener('click', async () => {
+                resetBackoff();
+                await flushOutbox();
+                renderQueue();
+            });
+
+            if (session && isIdleExpired()) {
+                clearSession();
+                applyPermissions();
+                showLogin('Сесію завершено через 10 хвилин бездіяльності. Увійдіть за PIN.');
+            } else if (session) {
+                startIdleWatch();
+                flushOutbox();
+                // Ярлик з маніфесту застосовуємо після завантаження бази
+                fetchData().then(applyManifestShortcut);
+            } else {
+                showLogin();
+            }
         });
     </script>
 </body>
