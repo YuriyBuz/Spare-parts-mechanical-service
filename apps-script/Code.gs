@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-23-time-qty';
+const CODE_VERSION = 'zip-2026-08-23-sheet-sync';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -629,8 +629,15 @@ function registerOperation_(payload) {
 
     const entry = [localStamp_(payload.timestamp), payload.date, payload.sheetName, itemNo, payload.model,
       operation.label, actor, location, serial, quantity, actor];
-    log.sheet.appendRow(entry);
-    log.rows.push({ row: log.sheet.getLastRow(), values: entry });
+
+    // Порядок тут має значення. Раніше рядок журналу писався ПЕРШИМ, і якщо
+    // далі падав запис в аркуш-каталог, залишалась половина операції: у журналі
+    // є, в аркуші немає. Повторна спроба з черги знаходила рядок журналу,
+    // вважала операцію дублем і поверталась з «успіхом», так і не дописавши
+    // аркуш. Тому спершу — в пам'ять і в аркуш, і лише наприкінці — в журнал:
+    // якщо аркуш не дався, журнал лишається чистим і повтор робить усе заново.
+    const pending = { row: 0, values: entry };
+    log.rows.push(pending);
 
     const newVal = applyStock_(sheet, position.row, log, payload.sheetName, payload.model,
       itemNo, stock, operation, quantity);
@@ -638,6 +645,9 @@ function registerOperation_(payload) {
     appendOperation(sheet, position.row, [
       operation.label, formatDate(payload.date), operation.prefix + quantity, serial, location, actor
     ]);
+
+    log.sheet.appendRow(entry);
+    pending.row = log.sheet.getLastRow();
 
     // Сповіщення лише про перетин порогу — не лист після кожного списання
     if (payload.action === 'registerUsage' || payload.action === 'registerInventory') {
@@ -722,8 +732,8 @@ function cancelOperation_(payload) {
     const cancelEntry = [localStamp_(now), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
       sheetName, entry.values[3], model, CANCEL_PREFIX + operation.genitive, session.name,
       note, String(entry.values[8] || '-'), quantity, session.name];
-    log.sheet.appendRow(cancelEntry);
-    log.rows.push({ row: log.sheet.getLastRow(), values: cancelEntry });
+    const pendingCancel = { row: 0, values: cancelEntry };
+    log.rows.push(pendingCancel);
 
     // 3. Перераховуємо залишок
     const stock = readStock_(sheet, itemRow);
@@ -735,6 +745,9 @@ function cancelOperation_(payload) {
       Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd.MM.yy'),
       (restored >= 0 ? '+' : '') + restored, String(entry.values[8] || '-'), note, session.name
     ]);
+
+    log.sheet.appendRow(cancelEntry);
+    pendingCancel.row = log.sheet.getLastRow();
 
     return { success: true, newStock: newVal, actor: session.name, cancelled: label };
   } finally {
@@ -1011,6 +1024,10 @@ function formatTimestamp_(value) {
 
 /** Дописує операцію в колонки F..K через кому з переносом рядка. */
 function appendOperation(sheet, row, values) {
+  if (sheet.getMaxColumns() < 11) {
+    throw new Error('Аркуш «' + sheet.getName() + '» має лише ' + sheet.getMaxColumns() +
+      ' колонок — блок операцій (F..K) нікуди писати.');
+  }
   const range = sheet.getRange(row, 6, 1, 6);
   const old = range.getDisplayValues()[0];
   range.setValues([values.map((value, i) => {
@@ -1609,6 +1626,136 @@ function auditEvents(days) {
   }
   const text = lines.join('\n');
   console.log(text);
+  return text;
+}
+
+// ==========================================
+// 4b. ЗВІРКА АРКУШІВ ІЗ ЖУРНАЛОМ
+// ==========================================
+/**
+ * Журнал — джерело правди, аркуш-каталог — його відображення. Якщо запис
+ * у журнал пройшов, а в аркуш ні (так було, поки рядок журналу писався
+ * першим), блок операцій F..K і залишок у колонці E відстають від журналу.
+ *
+ * auditSheetSync()   — лише показує, де саме розійшлося;
+ * rebuildOperations() — перебудовує блок операцій і залишок із журналу.
+ */
+function collectJournalByPosition_() {
+  const log = readLog_();
+  const byPosition = {};
+  log.rows.forEach(function (entry) {
+    const values = entry.values;
+    const sheetName = String(values[2]).trim();
+    const model = String(values[4]).trim();
+    if (!sheetName || !model) return;
+    const key = usageKey_(sheetName, values[3], model);
+    if (!byPosition[key]) byPosition[key] = [];
+    byPosition[key].push(values);
+  });
+  return { log: log, byPosition: byPosition };
+}
+
+/** Рядки блоку операцій, які журнал очікує побачити в аркуші. */
+function operationLinesFromLog_(entries) {
+  const lines = [];
+  entries.forEach(function (values) {
+    const label = String(values[5]).trim();
+    if (label.indexOf(CANCELLED_SUFFIX) !== -1) return;   // скасовані не показуємо
+    const operation = operationByLabel_(label) ||
+      (label.indexOf(CANCEL_PREFIX) === 0 ? { prefix: '+' } : null);
+    if (!operation) return;
+    const quantity = toNumber(values[9]);
+    lines.push([
+      label,
+      formatDate(values[1]),
+      (operation.prefix === '=' ? '=' : (operation.prefix === '-' ? '-' : '+')) + quantity,
+      String(values[8] || '-'),
+      String(values[7] || '-'),
+      String(values[10] || values[6] || '')
+    ]);
+  });
+  return lines;
+}
+
+function auditSheetSync() {
+  const data = collectJournalByPosition_();
+  const report = [];
+
+  forEachCatalogSheet(function (sheet) {
+    const lastRow = sheet.getLastRow();
+    if (lastRow < FIRST_DATA_ROW || sheet.getMaxColumns() < 11) return;
+    const values = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, 11).getDisplayValues();
+
+    values.forEach(function (row, i) {
+      const model = String(row[1]).trim();
+      if (!model) return;
+      const key = usageKey_(sheet.getName(), row[0], model);
+      const entries = data.byPosition[key];
+      if (!entries || !entries.length) return;
+
+      const expected = operationLinesFromLog_(entries).length;
+      const actual = String(row[5]).trim() ? String(row[5]).split('\n').length : 0;
+      const stockInSheet = toNumber(row[4]);
+      const stockFromLog = computeStockFromLog_(data.log, sheet.getName(), model, row[0], null);
+
+      if (expected !== actual || (stockFromLog !== null && stockFromLog !== stockInSheet)) {
+        report.push('  ' + sheet.getName() + ' · № ' + (row[0] || '?') + ' · ' + model +
+          ': операцій у журналі ' + expected + ', в аркуші ' + actual +
+          (stockFromLog !== null && stockFromLog !== stockInSheet
+            ? ', залишок ' + stockInSheet + ' → має бути ' + stockFromLog : ''));
+      }
+    });
+  });
+
+  const text = report.length
+    ? 'Аркуші розійшлися з журналом (' + report.length + '):\n' + report.join('\n') +
+      '\n\nВиправити: rebuildOperations() — перебудує блок операцій і залишок із журналу.'
+    : 'Аркуші збігаються з журналом.';
+  console.log(text);
+  return text;
+}
+
+/**
+ * Перебудовує блок операцій F..K і залишок E з журналу.
+ * Без аргументу проходить усі аркуші-каталоги, з назвою — лише вказаний.
+ */
+function rebuildOperations(onlySheetName) {
+  const data = collectJournalByPosition_();
+  let touched = 0;
+
+  forEachCatalogSheet(function (sheet) {
+    if (onlySheetName && sheet.getName() !== String(onlySheetName).trim()) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < FIRST_DATA_ROW || sheet.getMaxColumns() < 11) return;
+    const values = sheet.getRange(FIRST_DATA_ROW, 1, lastRow - FIRST_DATA_ROW + 1, 11).getDisplayValues();
+
+    values.forEach(function (row, i) {
+      const model = String(row[1]).trim();
+      if (!model) return;
+      const key = usageKey_(sheet.getName(), row[0], model);
+      const entries = data.byPosition[key];
+      if (!entries || !entries.length) return;
+
+      const lines = operationLinesFromLog_(entries);
+      if (!lines.length) return;
+      const sheetRow = i + FIRST_DATA_ROW;
+
+      const columns = [0, 1, 2, 3, 4, 5].map(function (c) {
+        const joined = lines.map(function (line) { return line[c]; }).join(',\n');
+        return (c === 1 || c === 2) ? "'" + joined : joined;   // дати й кількості лишаємо текстом
+      });
+      sheet.getRange(sheetRow, 6, 1, 6).setValues([columns]);
+
+      const stockFromLog = computeStockFromLog_(data.log, sheet.getName(), model, row[0], null);
+      if (stockFromLog !== null) sheet.getRange(sheetRow, 5).setValue(stockFromLog);
+      touched++;
+    });
+  });
+
+  const text = 'Перебудовано позицій: ' + touched +
+               (onlySheetName ? ' (аркуш «' + onlySheetName + '»)' : ' (усі аркуші)');
+  console.log(text);
+  logEvent_('tech', 'sheet.rebuilt', text);
   return text;
 }
 
