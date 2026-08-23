@@ -905,9 +905,10 @@
                         item.payload.sheetName + ' · ' + item.payload.model);
                     return 'failed';
                 }
-                return retryLater(item, (result && result.error) || 'Помилка сервера');
+                return retryLater(item, (result && result.error) || 'Помилка сервера', 'server');
             } catch (e) {
-                return retryLater(item, 'Немає зв’язку');
+                return retryLater(item, e && e.name === 'AbortError'
+                    ? 'Сервер не відповів вчасно' : 'Немає зв’язку', 'network');
             }
         };
 
@@ -920,7 +921,9 @@
             });
         });
 
-        const retryLater = (item, error) => {
+        // kind розрізняє дві різні біди з однаковим наслідком «спробуємо ще раз»:
+        // мережі немає — чекаємо мовчки; сервер відповів помилкою — це треба показати
+        const retryLater = (item, error, kind) => {
             const attempts = (item.attempts || 0) + 1;
             const delay = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
             // Одна невдача — це мережа. Три поспіль — це вже привід подивитись.
@@ -929,7 +932,8 @@
                     item.payload.sheetName + ' · ' + item.payload.model);
             }
             patchItem(item.opId, {
-                status: 'pending', attempts, nextAttemptAt: Date.now() + delay, lastError: error
+                status: 'pending', attempts, nextAttemptAt: Date.now() + delay,
+                lastError: error, lastErrorKind: kind || 'network'
             });
             return 'pending';
         };
@@ -1645,26 +1649,30 @@
         // --- Адресне зберігання ---
         document.getElementById('editStorageBtn').addEventListener('click', async () => {
             if (!currentSelectedItem || !can('manageStorage')) return;
+            // Поки людина набирає адресу, вікно могло закритись (автовихід, дотик
+            // повз) і currentSelectedItem стати null — тримаємось за копію
+            const target = currentSelectedItem;
 
             const value = await showPromptDialog(
-                `Місце зберігання для «${currentSelectedItem.model}»:<br><span class="text-sm text-gray-500">Наприклад: Контейнер 1, стелаж B, полиця 3</span>`,
-                currentSelectedItem.storage || 'Стелаж / полиця / комірка');
+                `Місце зберігання для «${target.model}»:<br><span class="text-sm text-gray-500">Наприклад: Контейнер 1, стелаж B, полиця 3</span>`,
+                target.storage || 'Стелаж / полиця / комірка');
             if (value === null) return;
 
             try {
                 const result = await apiPost({
                     action: 'setStorage',
-                    sheetName: currentSelectedItem.sheetName,
-                    row: currentSelectedItem.row,
-                    model: currentSelectedItem.model,
+                    sheetName: target.sheetName,
+                    row: target.row,
+                    no: target.no,
+                    model: target.model,
                     storage: value,
                     token: session.token, deviceId: getDeviceId()
                 });
                 if (result && result.success) {
-                    currentSelectedItem.storage = result.storage;
+                    target.storage = result.storage;
                     document.getElementById('modalStorage').textContent = result.storage || 'не вказано';
-                    const category = allData.find(c => c.name === currentSelectedItem.sheetName);
-                    const item = category && category.items.find(i => i.row === currentSelectedItem.row);
+                    const category = allData.find(c => c.name === target.sheetName);
+                    const item = category && category.items.find(i => i.row === target.row);
                     if (item) item.storage = result.storage;
                     localStorage.setItem(CACHE_KEY, JSON.stringify(allData));
                     renderState();
@@ -1674,7 +1682,14 @@
                     customAlert('❌ ' + ((result && result.error) || 'Не вдалося зберегти місце'));
                 }
             } catch (e) {
-                customAlert('❌ Немає зв’язку — місце зберігання змінюється лише онлайн.');
+                customAlert(e && e.name === 'AbortError'
+                    ? '❌ Сервер не відповів вчасно. Місце зберігання не змінено.'
+                    : navigator.onLine
+                        ? '❌ Сервер відповів не тим, що очікували: ' + ((e && e.message) || e) +
+                          '\nМісце зберігання не змінено.'
+                        : '❌ Немає зв’язку — місце зберігання змінюється лише онлайн.');
+                logEvent('error', 'setStorage.failed', (e && e.message) || String(e),
+                    target.sheetName + ' · ' + target.model);
             }
         });
 
@@ -1818,8 +1833,14 @@
                         showSuccessAndClose(false, outboxItem(item.opId).response);
                     }
                 } else {
+                    // Помилку сервера не можна видавати за відсутність мережі:
+                    // механік має бачити, що саме відповів сервер
+                    const queued = outboxItem(item.opId);
                     closeUsageModal('queued');
-                    customAlert('Немає зв’язку.\nЗапис збережено на пристрої й надійде автоматично, щойно з’явиться мережа.');
+                    customAlert(queued && queued.lastErrorKind === 'server'
+                        ? '⚠️ Сервер відповів помилкою:\n' + queued.lastError +
+                          '\n\nЗапис збережено на пристрої — повторимо автоматично.'
+                        : 'Немає зв’язку.\nЗапис збережено на пристрої й надійде автоматично, щойно з’явиться мережа.');
                 }
             } finally {
                 // Операція могла змінитися під час запиту — підпис ставимо за поточною

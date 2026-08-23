@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-23-sheet-sync';
+const CODE_VERSION = 'zip-2026-08-23-review';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -151,7 +151,10 @@ function verifySession_(token, deviceId) {
     return null;
   }
   if (!payload.e || payload.e < Date.now()) return null;
-  if (payload.d && deviceId && payload.d !== deviceId) return null;
+  // Токен виданий конкретному пристрою. Раніше перевірка пропускалась, якщо
+  // викликач просто не передав device — тобто прив'язку можна було обійти,
+  // не надіславши параметр. Тепер відсутність ідентифікатора = розбіжність.
+  if (payload.d && payload.d !== deviceId) return null;
 
   const employee = findEmployee_(payload.id);
   if (!employee || !employee.eligible) return null;
@@ -652,7 +655,9 @@ function registerOperation_(payload) {
     // Сповіщення лише про перетин порогу — не лист після кожного списання
     if (payload.action === 'registerUsage' || payload.action === 'registerInventory') {
       const info = readItemRow_(sheet, position.row);
-      maybeNotifyThreshold_({
+      // Пошта не має права зробити успішну операцію невдалою: квота MailApp
+      // вичерпується мовчки, а списання вже записане
+      tryNotifyThreshold_({
         sheetName: payload.sheetName, model: payload.model,
         equipment: String(info[2] || '').trim() || '—',
         minStock: toNumber(info[3]), stock: newVal,
@@ -771,8 +776,11 @@ function setStorage_(payload) {
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw authError_('BUSY', 'Сервер зайнятий іншим записом. Спробуйте ще раз.');
   try {
+    // Той самий захист, що й у записі операцій: номер рядка з клієнта міг
+    // застаріти, і адреса зберігання лягла б на сусідню деталь
+    const position = resolvePosition_(sheet, payload);
     ensureStorageColumn_(sheet);
-    const cell = sheet.getRange(payload.row, STORAGE_COL);
+    const cell = sheet.getRange(position.row, STORAGE_COL);
     const previous = String(cell.getDisplayValue()).trim();
     if (previous === storage) return { success: true, storage: storage, unchanged: true };
 
@@ -780,13 +788,14 @@ function setStorage_(payload) {
 
     const now = new Date();
     setupLogSheet().appendRow([
-      now.toISOString(), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-      payload.sheetName, sheet.getRange(payload.row, 1).getValue(), payload.model,
+      localStamp_(now), Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      payload.sheetName, position.itemNo, payload.model,
       'Зміна місця', session.name,
       'Місце: ' + (previous || '—') + ' → ' + (storage || '—'), '-', 0, session.name
     ]);
 
-    return { success: true, storage: storage, previous: previous, actor: session.name };
+    return { success: true, storage: storage, previous: previous, actor: session.name,
+             row: position.row, moved: position.moved };
   } finally {
     lock.releaseLock();
   }
@@ -1247,6 +1256,15 @@ function collectMovement_(validSheets, days) {
  * Сповіщення про перетин порогу: короткий лист про одну позицію, яка щойно
  * опустилася нижче мінімуму. Не частіше разу на добу на позицію.
  */
+function tryNotifyThreshold_(item) {
+  try {
+    maybeNotifyThreshold_(item);
+  } catch (error) {
+    logEvent_('error', 'mail.thresholdFailed',
+      (error && error.message) || String(error), item.sheetName + ' · ' + item.model);
+  }
+}
+
 function maybeNotifyThreshold_(item) {
   if (isAssetSheet_(item.sheetName)) return;
   if (!(item.stock < item.minStock)) return;
@@ -1261,8 +1279,6 @@ function maybeNotifyThreshold_(item) {
 
   const key = item.sheetName + '_' + item.model;
   if (notices[key] === today) return;
-  notices[key] = today;
-  properties.setProperty('thresholdNotices', JSON.stringify(notices));
 
   const emails = getNotificationEmails();
   if (!emails) return;
@@ -1281,6 +1297,11 @@ function maybeNotifyThreshold_(item) {
       '<tr><td>Постачальник</td><td>' + item.supplier + ' · ' + item.phone + '</td></tr></table>' +
       "<p style='color:#64748b; font-size:12px;'>Повний звіт — у понеділок або кнопкою в застосунку.</p></div>"
   });
+
+  // Позначку ставимо лише після справжнього надсилання. Раніше вона ставилась
+  // до нього, тож при вичерпаній квоті попередження губилось на цілий день.
+  notices[key] = today;
+  properties.setProperty('thresholdNotices', JSON.stringify(notices));
 }
 
 function isAssetSheet_(name) {
