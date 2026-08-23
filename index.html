@@ -497,9 +497,10 @@
 
         const autoLogout = () => {
             if (!session) return;
+            logEvent('tech', 'session.idleLogout', 'бездіяльність понад 10 хв');
             clearSession();
             applyPermissions();
-            closeUsageModal();
+            closeUsageModal('idle');
             showLogin('Сесію завершено через 10 хвилин бездіяльності. Увійдіть за PIN.');
         };
 
@@ -723,6 +724,63 @@
 
         let syncing = false;
 
+        // --- Журнал подій ---
+        // Три потоки: технічні помилки, стан застосунку і незавершені операції.
+        // Події буферяться на пристрої й вирушають пачкою — щоб діагностика
+        // не перетворилась на запит по кожному руху пальця.
+        const APP_VERSION = 'zip-app-2026-08-23';
+        const EVENT_KEY = 'zipEventsV1';
+        const EVENT_CAP = 60;              // більше не тримаємо: це діагностика, не облік
+        const EVENT_BATCH = 20;
+        const EVENT_FLUSH_MS = 120000;
+        let eventsSending = false;
+
+        const readEvents = () => {
+            try {
+                const stored = JSON.parse(localStorage.getItem(EVENT_KEY) || '[]');
+                return Array.isArray(stored) ? stored : [];
+            } catch (e) { return []; }
+        };
+
+        const logEvent = (kind, event, details, position) => {
+            try {
+                const list = readEvents();
+                list.push({
+                    kind: kind, event: event,
+                    details: String(details === undefined || details === null ? '' : details).slice(0, 500),
+                    position: position || '',
+                    timestamp: new Date().toISOString(),
+                    version: APP_VERSION
+                });
+                // Переповнення губимо з найстаріших: свіжа помилка цінніша за вчорашню
+                localStorage.setItem(EVENT_KEY, JSON.stringify(list.slice(-EVENT_CAP)));
+            } catch (e) { /* журнал подій ніколи не має ламати роботу */ }
+        };
+
+        const flushEvents = async () => {
+            if (eventsSending) return;
+            const list = readEvents();
+            if (!list.length) return;
+            eventsSending = true;
+            const batch = list.slice(0, EVENT_BATCH);
+            try {
+                const result = await apiPost({
+                    action: 'logEvents', entries: batch,
+                    token: session ? session.token : '', deviceId: getDeviceId()
+                });
+                if (result && result.success && !result.throttled) {
+                    // Видаляємо саме надіслані: за час запиту могли додатись нові
+                    const rest = readEvents().filter(item => batch.indexOf(item) === -1 &&
+                        !batch.some(sent => sent.timestamp === item.timestamp && sent.event === item.event));
+                    localStorage.setItem(EVENT_KEY, JSON.stringify(rest));
+                }
+            } catch (e) {
+                // Немає зв'язку — події почекають у буфері
+            } finally {
+                eventsSending = false;
+            }
+        };
+
         const readOutbox = () => {
             try {
                 const stored = JSON.parse(localStorage.getItem(OUTBOX_KEY) || 'null');
@@ -834,6 +892,8 @@
                         lastError: (result && result.error) || 'Сервер відхилив запис',
                         response: result
                     });
+                    logEvent('error', 'sync.rejected', code + ': ' + ((result && result.error) || ''),
+                        item.payload.sheetName + ' · ' + item.payload.model);
                     return 'failed';
                 }
                 return retryLater(item, (result && result.error) || 'Помилка сервера');
@@ -854,6 +914,11 @@
         const retryLater = (item, error) => {
             const attempts = (item.attempts || 0) + 1;
             const delay = BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)];
+            // Одна невдача — це мережа. Три поспіль — це вже привід подивитись.
+            if (attempts === 3) {
+                logEvent('error', 'sync.stuck', 'спроб: 3, причина: ' + error,
+                    item.payload.sheetName + ' · ' + item.payload.model);
+            }
             patchItem(item.opId, {
                 status: 'pending', attempts, nextAttemptAt: Date.now() + delay, lastError: error
             });
@@ -895,6 +960,7 @@
             } finally {
                 syncing = false;
                 updateNetworkStatus();
+                flushEvents();
             }
         };
 
@@ -1001,7 +1067,13 @@
                     drop.textContent = 'Видалити';
                     drop.onclick = async () => {
                         const go = await showCustomDialog(`Видалити запис «${item.payload.model}, ${item.payload.quantity} шт»?\n\nВін не потрапить у журнал.`, true);
-                        if (go) { removeItem(item.opId); renderQueue(); }
+                        if (go) {
+                            logEvent('abandoned', 'op.queueDropped',
+                                operationLabel(item.payload.action) + ', ' + item.payload.quantity +
+                                ' шт, причина відмови: ' + (item.lastError || '—'),
+                                item.payload.sheetName + ' · ' + item.payload.model);
+                            removeItem(item.opId); renderQueue();
+                        }
                     };
                     actions.appendChild(drop);
                     card.appendChild(actions);
@@ -1074,6 +1146,9 @@
             } catch (error) {
                 console.error("Fetch error:", error);
                 const timedOut = error && error.name === 'AbortError';
+                logEvent('error', timedOut ? 'error.readTimeout' : 'error.readFailed',
+                    'getInventory: ' + (timedOut ? READ_TIMEOUT_MS + ' мс без відповіді'
+                                                 : (error && error.message) || String(error)));
                 const cached = localStorage.getItem(CACHE_KEY);
                 if (cached) {
                     allData = JSON.parse(cached);
@@ -1120,6 +1195,10 @@
                 }
             } catch (error) {
                 console.warn("Помилка або офлайн, показуємо порожній список", error);
+                if (navigator.onLine) {
+                    logEvent('error', error && error.name === 'AbortError' ? 'error.readTimeout' : 'error.readFailed',
+                        'getHistory: ' + ((error && error.message) || String(error)));
+                }
                 historyData = [];
             } finally {
                 loader.classList.add('hidden');
@@ -1161,6 +1240,8 @@
                     customAlert('❌ ' + ((data && data.error) || 'Не вдалося надіслати план'));
                 }
             } catch (error) {
+                logEvent('error', error && error.name === 'AbortError' ? 'error.readTimeout' : 'error.readFailed',
+                    'forceReport: ' + ((error && error.message) || String(error)));
                 customAlert("❌ Помилка відправки. Перевірте зв'язок з інтернетом.");
             } finally {
                 loader.classList.add('hidden');
@@ -1531,7 +1612,17 @@
             setTimeout(() => { modalContent.classList.remove('translate-y-full'); }, 10);
         };
 
-        const closeUsageModal = () => {
+        // reason відсутній = вікно закрила людина. Саме такі випадки цікаві:
+        // механік почав списання і передумав — а деталь міг забрати.
+        const closeUsageModal = (reason) => {
+            if (!reason && currentSelectedItem) {
+                const entered = parseFloat(document.getElementById('useQuantity').value);
+                if (isFinite(entered) && entered > 0) {
+                    logEvent('abandoned', 'op.abandoned',
+                        operationLabel(currentOperation) + ', ' + entered + ' шт',
+                        currentSelectedItem.sheetName + ' · ' + currentSelectedItem.model);
+                }
+            }
             modalContent.classList.add('translate-y-full');
             setTimeout(() => {
                 modal.classList.add('hidden');
@@ -1576,7 +1667,9 @@
             }
         });
 
-        document.getElementById('closeUsageModalBtn').addEventListener('click', closeUsageModal);
+        // Без обгортки сюди прилетів би об'єкт події й зійшов за reason —
+        // і закриття вручну перестало б вважатися незавершеною операцією
+        document.getElementById('closeUsageModalBtn').addEventListener('click', () => closeUsageModal());
         modal.addEventListener('click', (e) => { if (e.target === modal) closeUsageModal(); });
 
         // --- Відправка даних ---
@@ -1608,6 +1701,9 @@
                     patchItem(opId, { status: 'pending', attempts: 0, nextAttemptAt: 0,
                         payload: Object.assign({}, item.payload, { overdrawReason: reason }) });
                 } else {
+                    logEvent('abandoned', 'op.overdrawDeclined',
+                        'просив ' + item.payload.quantity + ', доступно ' + available,
+                        item.payload.sheetName + ' · ' + item.payload.model);
                     return false;
                 }
                 return (await sendItem(opId)) === 'done';
@@ -1619,6 +1715,10 @@
                     return false;
                 }
                 const go = await showCustomDialog(item.lastError + '\n\nПровести інвентаризацію зараз?', true);
+                if (!go) {
+                    logEvent('abandoned', 'op.notCountedDeclined', 'від інвентаризації відмовились',
+                        item.payload.sheetName + ' · ' + item.payload.model);
+                }
                 if (go) {
                     removeItem(opId);
                     setOperation('registerInventory');
@@ -1690,14 +1790,14 @@
                 if (outcome === 'done') {
                     showSuccessAndClose(false, outboxItem(item.opId).response);
                 } else if (outcome === 'auth') {
-                    closeUsageModal();
+                    closeUsageModal('auth');
                     handleAuthFailure();
                 } else if (outcome === 'failed') {
                     if (await resolveFailedItem(item.opId)) {
                         showSuccessAndClose(false, outboxItem(item.opId).response);
                     }
                 } else {
-                    closeUsageModal();
+                    closeUsageModal('queued');
                     customAlert('Немає зв’язку.\nЗапис збережено на пристрої й надійде автоматично, щойно з’явиться мережа.');
                 }
             } finally {
@@ -1729,7 +1829,7 @@
                 renderState();
             }
 
-            closeUsageModal();
+            closeUsageModal('done');
             
             if (isOffline) {
                 customAlert("Відсутній зв'язок.\nЗапис збережено в телефоні і буде відправлено автоматично при появі інтернету!");
@@ -1803,11 +1903,30 @@
                 showLogin('Ви вийшли із застосунку');
             });
 
+            // Необроблена помилка на планшеті інакше лишається лише в консолі,
+            // якої ніхто в цеху не відкриє
+            window.addEventListener('error', (e) => {
+                logEvent('error', 'error.js',
+                    (e.message || 'помилка') + ' @ ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0));
+            });
+            window.addEventListener('unhandledrejection', (e) => {
+                const reason = e.reason;
+                logEvent('error', 'error.promise',
+                    (reason && (reason.message || reason.name)) || String(reason));
+            });
+            logEvent('tech', 'app.start', 'екран ' + screen.width + '×' + screen.height +
+                ', ' + (navigator.onLine ? 'онлайн' : 'офлайн') +
+                (window.matchMedia('(display-mode: standalone)').matches ? ', встановлений' : ', браузер'));
+
             migrateLegacyQueue();
             resetBackoff();   // сторінку щойно відкрили — це нова спроба, а не продовження старої
             window.addEventListener('online', () => { updateNetworkStatus(); resetBackoff(); flushOutbox(); });
+            setInterval(flushEvents, EVENT_FLUSH_MS);
             window.addEventListener('offline', updateNetworkStatus);
-            document.addEventListener('visibilitychange', () => { if (!document.hidden) flushOutbox(); });
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) { flushEvents(); return; }   // йдемо з екрана — саме час віддати накопичене
+                flushOutbox();
+            });
             setInterval(() => { if (outboxCounts().pending) flushOutbox(); }, SYNC_INTERVAL_MS);
 
             document.getElementById('networkStatusBtn').addEventListener('click', openQueuePanel);

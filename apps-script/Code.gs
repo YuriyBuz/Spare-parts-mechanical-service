@@ -19,7 +19,7 @@
  * щоб не було ситуації, коли одну з частин забули додати в проєкт.
  */
 
-const CODE_VERSION = 'zip-2026-08-22-offline';
+const CODE_VERSION = 'zip-2026-08-23-events';
 
 // ==========================================
 // 0. АВТЕНТИФІКАЦІЯ ТА ПРАВА
@@ -66,6 +66,8 @@ function loginWithPin_(pin, deviceId) {
   const attemptsKey = 'pin_attempts_' + (deviceId || 'unknown');
   const attempts = Number(cache.get(attemptsKey) || 0);
   if (attempts >= MAX_PIN_ATTEMPTS) {
+    logEvent_('access', 'login.throttled', { device: deviceId,
+      details: 'спроб поспіль: ' + attempts });
     return fail_('THROTTLED', 'Забагато спроб. Спробуйте за 5 хвилин.');
   }
 
@@ -79,9 +81,14 @@ function loginWithPin_(pin, deviceId) {
   if (matches.length === 0) {
     cache.put(attemptsKey, String(attempts + 1), ATTEMPT_WINDOW_SECONDS);
     Utilities.sleep(400);   // сповільнює перебір
+    // Сам PIN не пишемо ніде — лише його довжину і номер спроби
+    logEvent_('access', 'login.badPin', { device: deviceId,
+      details: 'довжина PIN: ' + value.length + ', спроба ' + (attempts + 1) });
     return fail_('BAD_PIN', 'Невірний PIN');
   }
   if (matches.length > 1) {
+    logEvent_('access', 'login.pinNotUnique', { device: deviceId,
+      details: 'збіг у ' + matches.length + ' співробітників' });
     // Не вгадуємо, хто саме — інакше запис піде не на ту людину
     return fail_('PIN_NOT_UNIQUE',
       'Цей PIN закріплений за кількома співробітниками. Зверніться до адміністратора, щоб вам призначили власний PIN.');
@@ -89,6 +96,7 @@ function loginWithPin_(pin, deviceId) {
 
   cache.remove(attemptsKey);
   const employee = matches[0];
+  noteLogin_(employee, deviceId);
   const expiresAt = Date.now() + SESSION_TTL_MINUTES * 60 * 1000;
   return {
     success: true,
@@ -165,6 +173,8 @@ function verifySession_(token, deviceId) {
 function requirePermission_(request, action) {
   const session = requireSession_(request);
   if (session.permissions.indexOf(action) === -1) {
+    logEvent_('access', 'access.denied', { actor: session.name, device: request.deviceId,
+      details: 'дія: ' + action + ', ролі: ' + (session.roles || []).join(', ') });
     throw authError_('FORBIDDEN', 'Ваша роль не дозволяє цю дію: ' + action);
   }
   return session;
@@ -318,7 +328,11 @@ function auditPins() {
 
 const LOG_SHEET_NAME = 'Лог_використання';
 const USERS_SHEET_NAME = 'Користувачі';
-const SERVICE_SHEETS = [LOG_SHEET_NAME, USERS_SHEET_NAME, 'Контакти', 'Довідник', 'Зведення', 'Історія'];
+const EVENT_SHEET_NAME = 'Журнал_подій';
+// Службові аркуші не є каталогом позицій: інакше журнал подій потрапив би
+// і в список ЗІП у застосунку, і у звіт про закупівлю
+const SERVICE_SHEETS = [LOG_SHEET_NAME, USERS_SHEET_NAME, EVENT_SHEET_NAME,
+                        'Контакти', 'Довідник', 'Зведення', 'Історія'];
 
 // Використовується, доки аркуш «Користувачі» не заповнено.
 const FALLBACK_EMAILS = 'Buznitskiy7@gmail.com, dyndarnastia@gmail.com';
@@ -503,6 +517,10 @@ function doPost(e) {
     }
     if (payload.action === 'setStorage') {
       return json(setStorage_(payload));
+    }
+    // Діагностика: приймаємо навіть без сесії — саме тоді, коли ламається вхід
+    if (payload.action === 'logEvents') {
+      return json(logClientEvents_(payload));
     }
     return json(registerOperation_(payload));
 
@@ -1242,6 +1260,244 @@ function setupLogSheet() {
 }
 
 // ==========================================
+// 4a. ЖУРНАЛ ПОДІЙ
+// ==========================================
+/**
+ * Окремий аркуш, навмисно НЕ «Лог_використання». Причина суто технічна:
+ * readLog_() читає журнал операцій цілком на кожному записі, бо залишок
+ * рахується з нього. Якби події лежали там само, кожна видача платила б
+ * швидкістю за кожен зафіксований вхід і кожну помилку.
+ *
+ * Три потоки:
+ *   access    — вхід, невдалий PIN, новий пристрій, зміна ролі, відмова за правами
+ *   error     — таймаути, збої синхронізації, помилки JS
+ *   tech      — версія застосунку на пристрої, автовихід, відновлення черги
+ *   abandoned — операцію почали й не завершили
+ *
+ * Події «access» пише лише сервер: клієнт не може їх підробити.
+ */
+const EVENT_WIDTH = 10;                 // A..J
+const EVENT_RETENTION_DAYS = 180;
+const EVENT_RATE_PER_MINUTE = 30;       // більше з одного пристрою — це вже не діагностика
+const EVENT_BATCH_LIMIT = 25;
+const EVENT_TEXT_LIMIT = 500;
+const CLIENT_EVENT_KINDS = ['tech', 'error', 'abandoned'];
+const EVENT_KIND_LABELS = { access: 'Доступ', tech: 'Техніка',
+                            error: 'Помилка', abandoned: 'Незавершена' };
+
+function setupEventSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(EVENT_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(EVENT_SHEET_NAME);
+    sheet.appendRow(['Час запису', 'Дата', 'Час', 'Тип', 'Подія', 'Хто',
+                     'Пристрій', 'Позиція', 'Деталі', 'Версія']);
+    sheet.getRange(1, 1, 1, EVENT_WIDTH).setFontWeight('bold').setBackground('#fff2cc');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(9, 320);
+  }
+  return sheet;
+}
+
+function trimText_(value, limit) {
+  const text = String(value === null || value === undefined ? '' : value).trim();
+  const max = limit || EVENT_TEXT_LIMIT;
+  return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+/** Пристрій у журналі — вісім символів: досить, щоб відрізнити, і не досить, щоб підставити. */
+function shortDevice_(deviceId) {
+  return String(deviceId || '').slice(0, 8);
+}
+
+function eventRow_(entry) {
+  const when = entry.timestamp ? new Date(entry.timestamp) : new Date();
+  const stamp = isNaN(when.getTime()) ? new Date() : when;
+  return [
+    stamp.toISOString(),
+    Utilities.formatDate(stamp, Session.getScriptTimeZone(), 'dd.MM.yyyy'),
+    Utilities.formatDate(stamp, Session.getScriptTimeZone(), 'HH:mm:ss'),
+    EVENT_KIND_LABELS[entry.kind] || entry.kind,
+    trimText_(entry.event, 60),
+    trimText_(entry.actor, 120),
+    shortDevice_(entry.device),
+    trimText_(entry.position, 120),
+    trimText_(entry.details),
+    trimText_(entry.version, 40)
+  ];
+}
+
+/**
+ * Запис подій. Ніколи не кидає помилку і ніколи не бере замок операцій:
+ * діагностика не має права зламати або сповільнити списання.
+ */
+function logEvents_(entries) {
+  if (!entries || !entries.length) return 0;
+  try {
+    const rows = entries.map(eventRow_);
+    const sheet = setupEventSheet();
+    const lock = LockService.getDocumentLock();
+    if (lock && !lock.tryLock(5000)) {
+      // Аркуш зайнятий іншим записом — подія не варта того, щоб на неї чекати
+      entries.forEach(function (entry) { console.log('event(skipped): ' + entry.event); });
+      return 0;
+    }
+    try {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, EVENT_WIDTH).setValues(rows);
+    } finally {
+      if (lock) lock.releaseLock();
+    }
+    return rows.length;
+  } catch (error) {
+    // Журнал подій — не критичний шлях: якщо не записалось, лишаємо слід у Cloud Logging
+    console.error('logEvents_ failed: ' + (error && error.message));
+    return 0;
+  }
+}
+
+function logEvent_(kind, event, fields) {
+  const entry = Object.assign({ kind: kind, event: event, version: CODE_VERSION }, fields || {});
+  if (kind === 'error') console.error(event + ' ' + trimText_(entry.details, 200));
+  return logEvents_([entry]);
+}
+
+/**
+ * Приймання подій від клієнта. Обмеження навмисні:
+ * лише технічні й незавершені (доступ пише сервер), не більше EVENT_BATCH_LIMIT
+ * за запит і не більше EVENT_RATE_PER_MINUTE на пристрій за хвилину.
+ */
+function logClientEvents_(payload) {
+  const device = String(payload.deviceId || '');
+  const entries = Array.isArray(payload.entries) ? payload.entries.slice(0, EVENT_BATCH_LIMIT) : [];
+  if (!entries.length) return { success: true, accepted: 0 };
+
+  const cache = CacheService.getScriptCache();
+  const key = 'ev_rate_' + (shortDevice_(device) || 'unknown');
+  const used = Number(cache.get(key) || 0);
+  if (used >= EVENT_RATE_PER_MINUTE) {
+    return { success: true, accepted: 0, throttled: true };
+  }
+
+  // Ім'я беремо з сесії, а не з того, що надіслав клієнт. Без сесії подія
+  // все одно цінна (саме тоді ламається вхід), просто без автора.
+  let actor = '';
+  try {
+    const session = verifySession_(payload.token, payload.deviceId);
+    if (session) actor = session.name;
+  } catch (error) { actor = ''; }
+
+  const allowed = entries
+    .filter(function (entry) { return CLIENT_EVENT_KINDS.indexOf(entry.kind) !== -1; })
+    .slice(0, EVENT_RATE_PER_MINUTE - used)
+    .map(function (entry) {
+      return {
+        kind: entry.kind, event: entry.event, timestamp: entry.timestamp,
+        actor: actor, device: device, position: entry.position,
+        details: entry.details, version: entry.version
+      };
+    });
+
+  const written = logEvents_(allowed);
+  cache.put(key, String(used + allowed.length), 60);
+  return { success: true, accepted: written };
+}
+
+/**
+ * Пам'ять про пристрої та ролі співробітника — щоб відрізнити звичайний вхід
+ * від входу з нового пристрою і помітити, що роль змінили в довіднику.
+ */
+function noteLogin_(employee, deviceId) {
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const device = shortDevice_(deviceId);
+    const deviceKey = 'seen_devices_' + employee.id;
+    let devices = [];
+    try { devices = JSON.parse(props.getProperty(deviceKey) || '[]'); } catch (error) { devices = []; }
+
+    const isNewDevice = !!device && devices.indexOf(device) === -1;
+    if (isNewDevice) {
+      devices.push(device);
+      props.setProperty(deviceKey, JSON.stringify(devices.slice(-10)));
+    }
+
+    const rolesKey = 'seen_roles_' + employee.id;
+    const roles = (employee.roles || []).join(', ');
+    const previous = props.getProperty(rolesKey);
+    if (previous !== null && previous !== roles) {
+      logEvent_('access', 'role.changed', {
+        actor: employee.name, device: deviceId,
+        details: 'було: ' + (previous || '—') + ' → стало: ' + (roles || '—')
+      });
+    }
+    if (previous !== roles) props.setProperty(rolesKey, roles);
+
+    logEvent_('access', isNewDevice ? 'login.newDevice' : 'login.ok', {
+      actor: employee.name, device: deviceId, details: 'ролі: ' + (roles || '—')
+    });
+  } catch (error) {
+    console.error('noteLogin_ failed: ' + (error && error.message));
+  }
+}
+
+/** Видаляє події, старші за EVENT_RETENTION_DAYS. Викликається зі щотижневого тригера. */
+function pruneEvents_() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EVENT_SHEET_NAME);
+    if (!sheet) return 0;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return 0;
+
+    const stamps = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    const edge = Date.now() - EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    let stale = 0;
+    // Рядки лежать за зростанням часу, тож рахуємо, скільки їх зверху застаріло
+    for (let i = 0; i < stamps.length; i++) {
+      const when = new Date(stamps[i][0]);
+      if (isNaN(when.getTime()) || when.getTime() >= edge) break;
+      stale++;
+    }
+    if (stale > 0) sheet.deleteRows(2, stale);
+    return stale;
+  } catch (error) {
+    console.error('pruneEvents_ failed: ' + (error && error.message));
+    return 0;
+  }
+}
+
+/** Зведення для запуску з редактора Apps Script. */
+function auditEvents(days) {
+  const window = Number(days) || 7;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(EVENT_SHEET_NAME);
+  if (!sheet || sheet.getLastRow() < 2) return 'Журнал подій порожній.';
+
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, EVENT_WIDTH).getValues();
+  const edge = Date.now() - window * 24 * 60 * 60 * 1000;
+  const counts = {};
+  const recentErrors = [];
+
+  rows.forEach(function (row) {
+    const when = new Date(row[0]);
+    if (isNaN(when.getTime()) || when.getTime() < edge) return;
+    const name = row[3] + ' · ' + row[4];
+    counts[name] = (counts[name] || 0) + 1;
+    if (row[3] === EVENT_KIND_LABELS.error) {
+      recentErrors.push(row[1] + ' ' + row[2] + '  ' + row[4] + '  ' + row[8]);
+    }
+  });
+
+  const lines = ['Події за ' + window + ' дн.:'];
+  Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; })
+    .forEach(function (name) { lines.push('  ' + counts[name] + '  ' + name); });
+  if (recentErrors.length) {
+    lines.push('', 'Останні помилки:');
+    recentErrors.slice(-10).forEach(function (line) { lines.push('  ' + line); });
+  }
+  const text = lines.join('\n');
+  console.log(text);
+  return text;
+}
+
+// ==========================================
 // 5. СЛУЖБОВЕ
 // ==========================================
 function forEachCatalogSheet(callback) {
@@ -1307,5 +1563,6 @@ function setupWeeklyReport() {
 
 /** Обгортка: тригер передає у функцію об'єкт події, а не прапорець isManual. */
 function weeklyReport() {
+  pruneEvents_();
   sendReport(false);
 }
