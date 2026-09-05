@@ -14,7 +14,19 @@ function getTimesheetSs_(cfg) {
   var active = null;
   try { active = SpreadsheetApp.getActiveSpreadsheet(); } catch (e) { active = null; }
   if (active && (!cfg.TIMESHEET_ID || active.getId() === cfg.TIMESHEET_ID)) return active;
+  if (!cfg.TIMESHEET_ID) {
+    throw new Error('Скрипт не прив’язаний до таблиці табелю і TIMESHEET_ID не задано. ' + SETUP_HINT);
+  }
   return SpreadsheetApp.openById(cfg.TIMESHEET_ID);
+}
+
+/** Посилання на таблиці — для листів. */
+function timesheetUrl_(cfg) {
+  try { return getTimesheetSs_(cfg).getUrl(); } catch (e) { return ''; }
+}
+
+function refUrl_(cfg) {
+  return cfg.REF_ID ? 'https://docs.google.com/spreadsheets/d/' + cfg.REF_ID + '/edit' : '';
 }
 
 function daysInMonth_(year, month) {

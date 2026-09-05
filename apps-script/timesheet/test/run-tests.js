@@ -44,7 +44,7 @@ for (let d = 0; d < 31; d++) {
 }
 merges.push({ row: 2, col: 65, nr: 1, nc: 2 });
 
-const tsSs = new Spreadsheet('1IkEuZx471RLdpoWlOwfWjNsgrlkhD6mITU4GlQR8urI', 'Табель 2026');
+const tsSs = new Spreadsheet('timesheet-test', 'Табель 2026');
 tsSs.addSheet('Липень 2026', [['Липень 2026']], []);
 const aug = tsSs.addSheet('Серпень 2026', grid, merges);
 __REGISTER_SS__(tsSs);
@@ -103,7 +103,7 @@ refRows.push(['EMP-9002', NAME.ambiguous, shortOf(NAME.ambiguous), NAME.ambiguou
 refRows.push(['EMP-9003', 'Адмін Адміністратор Адмінович', 'Адмін А. А.', 'Адмін', '', '', '',
   'active', '', '', '', '', '', '', 'admin@example.com', '', '9988', 'admin', '', '', '', '', '']);
 
-const refSs = new Spreadsheet('1UhdO9ALcSXk8fgWhUnMiluO4Aao6R4EP6iN4Ie__rY8', 'gw-ref');
+const refSs = new Spreadsheet('ref-test', 'Довідник працівників');
 refSs.addSheet('_REF_Employees', refRows.map(r => r.slice()), []);
 refSs.addSheet('_REF_Aliases', [['варіант написання', 'emp_id', 'джерело', 'додано']], []);
 __REGISTER_SS__(refSs);
@@ -112,6 +112,8 @@ __REGISTER_SS__(refSs);
 let failed = 0;
 function assert(ok, msg) { console.log((ok ? '  ✓ ' : '  ✗ ') + msg); if (!ok) failed++; }
 
+// Довідник і пошта задаються через властивості скрипта, як у реальній таблиці.
+global.__PROPS__ = { REF_ID: 'ref-test', ADMIN_EMAILS: 'admin@example.test' };
 const cfg = getConfig();
 
 console.log('\n== Розкладка «Серпень 2026» ==');
@@ -189,6 +191,9 @@ assert(!!mail, 'лист сформовано');
 assert(/Вересень 2026/.test(mail.subject) && /⚠/.test(mail.subject), 'тема: ' + mail.subject);
 assert(mail.htmlBody.indexOf(NAME.notInRef) > 0 && mail.htmlBody.indexOf('EMP-9001') > 0,
   'у листі перелічені невідповідності');
+assert(mail.to === 'admin@example.test', 'лист пішов на адресу з налаштувань');
+assert(mail.htmlBody.indexOf('https://example.test/timesheet-test') > 0,
+  'посилання на табель узято з самої таблиці');
 
 console.log('\n== Повторний запуск ==');
 global.__MAIL__ = [];
@@ -210,6 +215,20 @@ assert(octSheet.get(2, l3.shiftsCol) === 'за місяць' && octSheet.get(4, 
   'підсумки після розширення');
 assert(l3.empIdCol === 3, 'emp_id збережено');
 console.log('  ' + JSON.stringify(oct.structure));
+
+console.log('\n== Налаштування ==');
+assert(extractSpreadsheetId_('https://docs.google.com/spreadsheets/d/AbC-123_xY/edit?gid=7#gid=7')
+  === 'AbC-123_xY', 'ID видобувається з посилання');
+assert(extractSpreadsheetId_('AbC-123_xY') === 'AbC-123_xY', 'голий ID приймається як є');
+assert(getConfig().ADMIN_EMAILS_LIST.length === 1, 'пошта читається з властивостей скрипта');
+(function () {
+  const saved = global.__PROPS__;
+  global.__PROPS__ = { ADMIN_EMAILS: 'admin@example.test' };
+  let msg = '';
+  try { loadReference_(getConfig()); } catch (e) { msg = e.message; }
+  assert(/Не вказано довідник/.test(msg), 'без довідника — зрозуміла помилка, а не збій: ' + msg);
+  global.__PROPS__ = saved;
+})();
 
 console.log('\n== Розпізнавання назв аркушів ==');
 assert(JSON.stringify(parseMonthSheetName_('Вересень 2026')) === '{"year":2026,"month":9}', 'Вересень 2026');

@@ -53,6 +53,7 @@ function isAdminOnly_(emp) {
 
 /** Читає _REF_Employees та аркуш псевдонімів. */
 function loadReference_(cfg) {
+  if (!cfg.REF_ID) throw new Error('Не вказано довідник працівників. ' + SETUP_HINT);
   var ss = SpreadsheetApp.openById(cfg.REF_ID);
   var sh = ss.getSheetByName(cfg.REF_EMPLOYEES_SHEET);
   if (!sh) {

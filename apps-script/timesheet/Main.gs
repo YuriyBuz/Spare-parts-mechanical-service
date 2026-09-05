@@ -13,12 +13,53 @@ function onOpen() {
       .addItem('🆔 Проставити emp_id (з ' + getConfig().EMP_ID_FROM + ' і далі)', 'manualBackfillEmpIds')
       .addSeparator()
       .addItem('🎛 Панель керування', 'showSidebar')
+      .addItem('⚙️ Перші налаштування (довідник і пошта)', 'showSetupDialog')
       .addItem('⚙️ Увімкнути автостворення (кінець місяця)', 'installTriggers')
       .addItem('⛔ Вимкнути автостворення', 'removeTriggers')
       .addToUi();
   } catch (e) {
     // Без інтерфейсу (наприклад, у тригері) меню не потрібне.
   }
+}
+
+/**
+ * Питає посилання на довідник і пошту адміністратора, зберігає їх у
+ * властивостях скрипта. ID таблиць у коді не зберігаються.
+ */
+function showSetupDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var cfg = getConfig();
+
+  var r1 = ui.prompt('Налаштування 1 з 2 — довідник працівників',
+    'Вставте посилання на таблицю-довідник (аркуш «' + cfg.REF_EMPLOYEES_SHEET + '»)' +
+    (cfg.REF_ID ? '\n\nЗараз: ' + cfg.REF_ID : ''),
+    ui.ButtonSet.OK_CANCEL);
+  if (r1.getSelectedButton() !== ui.Button.OK) return;
+  var refId = extractSpreadsheetId_(r1.getResponseText());
+  if (!refId) { ui.alert('Табель', 'Посилання порожнє — нічого не змінено.', ui.ButtonSet.OK); return; }
+
+  var refName;
+  try {
+    refName = SpreadsheetApp.openById(refId).getName();
+  } catch (e) {
+    ui.alert('Табель', 'Не вдалося відкрити таблицю за цим посиланням:\n' + e.message,
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  var r2 = ui.prompt('Налаштування 2 з 2 — пошта',
+    'Кому надсилати звіти? Кілька адрес — через кому.' +
+    (cfg.ADMIN_EMAILS ? '\n\nЗараз: ' + cfg.ADMIN_EMAILS : ''),
+    ui.ButtonSet.OK_CANCEL);
+  if (r2.getSelectedButton() !== ui.Button.OK) return;
+
+  saveSetup_(refId, r2.getResponseText());
+  var saved = getConfig();
+  ui.alert('Табель',
+    'Збережено.\n\nДовідник: ' + refName + '\nЗвіти: ' +
+    (saved.ADMIN_EMAILS_LIST.join(', ') || '— (жодної коректної адреси)') +
+    '\n\nДалі: ⏱ Табель → 🆔 Проставити emp_id, потім ⚙️ Увімкнути автостворення.',
+    ui.ButtonSet.OK);
 }
 
 function showSidebar() {
@@ -242,7 +283,7 @@ function notifyFailure_(cfg, what, err) {
       to: cfg.ADMIN_EMAILS_LIST.join(','),
       subject: '❌ Табель: помилка — ' + what,
       body: 'Не вдалося виконати «' + what + '».\n\n' + (err && err.stack ? err.stack : err) +
-        '\n\nhttps://docs.google.com/spreadsheets/d/' + cfg.TIMESHEET_ID + '/edit',
+        '\n\n' + timesheetUrl_(cfg),
       name: cfg.EMAIL_SENDER_NAME
     });
   } catch (e) {
@@ -284,7 +325,7 @@ function removeTriggers() {
 
 function sendBatchEmail_(reports, cfg, subject) {
   if (!cfg.ADMIN_EMAILS_LIST.length) return false;
-  var ssUrl = 'https://docs.google.com/spreadsheets/d/' + cfg.TIMESHEET_ID + '/edit';
+  var ssUrl = timesheetUrl_(cfg);
   var totalIssues = reports.reduce(function (a, r) { return a + r.issuesCount; }, 0);
   var summary = htmlTable_(
     ['Аркуш', 'Працівників', 'emp_id', 'Невідповідностей'],

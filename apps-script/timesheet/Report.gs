@@ -214,10 +214,12 @@ function buildEmailHtml_(report, cfg, ssUrl) {
       'усі ПІБ звірені з довідником.</p>';
   }
 
+  var refHref = refUrl_(cfg);
   var links = '<p style="margin-top:20px;font-size:13px;">' +
-    '<a href="' + esc_(ssUrl) + '" style="color:#2563eb;">Відкрити табель</a> &nbsp;•&nbsp; ' +
-    '<a href="https://docs.google.com/spreadsheets/d/' + esc_(cfg.REF_ID) +
-    '/edit" style="color:#2563eb;">Відкрити довідник gw-ref</a></p>' +
+    (ssUrl ? '<a href="' + esc_(ssUrl) + '" style="color:#2563eb;">Відкрити табель</a>' : '') +
+    (ssUrl && refHref ? ' &nbsp;•&nbsp; ' : '') +
+    (refHref ? '<a href="' + esc_(refHref) +
+      '" style="color:#2563eb;">Відкрити довідник</a>' : '') + '</p>' +
     '<p style="color:#94a3b8;font-size:11px;margin-top:14px;">' +
     'Лист сформовано скриптом «Табель — автоматизація». Налаштування отримувачів — ' +
     'у властивостях скрипта (ADMIN_EMAILS).</p></div>';
@@ -231,7 +233,7 @@ function sendReportEmail_(report, cfg) {
     report.errors.push('Не задано ADMIN_EMAILS — лист не надіслано.');
     return false;
   }
-  var ssUrl = 'https://docs.google.com/spreadsheets/d/' + cfg.TIMESHEET_ID + '/edit';
+  var ssUrl = timesheetUrl_(cfg);
   var flag = report.issuesCount ? '⚠️ ' : '✅ ';
   var subject = flag + 'Табель: ' +
     (report.created ? 'створено аркуш «' : 'звірка аркуша «') + report.sheetName + '»' +

@@ -74,7 +74,8 @@ class Sheet {
 
 class Spreadsheet {
   constructor(id,name){this.id=id;this.name=name;this.sheets=[];this.active=null;}
-  getId(){return this.id;} getSheets(){return this.sheets.slice();}
+  getId(){return this.id;} getUrl(){return 'https://example.test/'+this.id;}
+  getSheets(){return this.sheets.slice();}
   getSheetByName(n){return this.sheets.find(s=>s.getName()===n)||null;}
   getActiveSheet(){return this.active||this.sheets[0];}
   setActiveSheet(s){this.active=s;return s;}

@@ -8,14 +8,17 @@
 
 var DEFAULT_CONFIG = {
   // --- Джерела даних ---
-  // Табель 2026
-  TIMESHEET_ID: '1IkEuZx471RLdpoWlOwfWjNsgrlkhD6mITU4GlQR8urI',
-  // gw-ref (довідник працівників)
-  REF_ID: '1UhdO9ALcSXk8fgWhUnMiluO4Aao6R4EP6iN4Ie__rY8',
+  // Таблиця табелю. Порожньо = скрипт прив'язаний до самої таблиці
+  // (Розширення → Apps Script) і працює з нею. Заповнювати треба лише
+  // для окремого (standalone) проєкту.
+  TIMESHEET_ID: '',
+  // Довідник працівників (gw-ref). Обов'язково — задається один раз через
+  // ⏱ Табель → ⚙️ Перші налаштування. Приймає і посилання, і сам ID.
+  REF_ID: '',
   REF_EMPLOYEES_SHEET: '_REF_Employees',
 
   // --- Отримувачі звіту (через кому) ---
-  ADMIN_EMAILS: 'buznitskiy7@gmail.com',
+  ADMIN_EMAILS: '',
   EMAIL_SENDER_NAME: 'Табель — автоматизація',
 
   // --- Поведінка ---
@@ -106,9 +109,30 @@ function getConfig() {
     .map(function (s) { return s.trim(); })
     .filter(function (s) { return s.indexOf('@') > 0; });
 
+  cfg.TIMESHEET_ID = extractSpreadsheetId_(cfg.TIMESHEET_ID);
+  cfg.REF_ID = extractSpreadsheetId_(cfg.REF_ID);
+
   var m = /^(\d{4})-(\d{1,2})$/.exec(String(cfg.EMP_ID_FROM).trim());
   cfg.EMP_ID_FROM_YEAR = m ? Number(m[1]) : 2026;
   cfg.EMP_ID_FROM_MONTH = m ? Number(m[2]) : 8;
 
   return cfg;
 }
+
+/** Приймає і повне посилання на таблицю, і голий ID. */
+function extractSpreadsheetId_(value) {
+  var s = String(value === null || value === undefined ? '' : value).trim();
+  var m = /\/spreadsheets\/d\/([a-zA-Z0-9_\-]+)/.exec(s);
+  return m ? m[1] : s;
+}
+
+/** Записує ID довідника та пошту адміністраторів у властивості скрипта. */
+function saveSetup_(refId, adminEmails) {
+  var props = {};
+  if (refId !== null && refId !== undefined) props.REF_ID = extractSpreadsheetId_(refId);
+  if (adminEmails !== null && adminEmails !== undefined) props.ADMIN_EMAILS = String(adminEmails).trim();
+  PropertiesService.getScriptProperties().setProperties(props, false);
+}
+
+var SETUP_HINT = 'Відкрийте ⏱ Табель → ⚙️ Перші налаштування і вкажіть довідник gw-ref ' +
+  'та пошту адміністратора.';
