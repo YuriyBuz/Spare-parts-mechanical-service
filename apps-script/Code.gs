@@ -772,6 +772,10 @@ function fixCredentialColumnsToText() {
  * Прибирає прострочені сесії. Раніше вони видалялися лише випадково,
  * тому вкладка «Сесії» росла нескінченно, а validateSession читав її повністю
  * на КОЖЕН запит.
+ *
+ * Працює одним перезаписом діапазону, а не тисячами deleteRow — інакше
+ * на великій вкладці функція впирається в ліміт виконання 6 хвилин.
+ *
  * Рекомендовано повісити тригер: Тригери → Додати тригер → cleanupOldSessions → раз на день.
  */
 function cleanupOldSessions() {
@@ -779,19 +783,30 @@ function cleanupOldSessions() {
   var sheet = ss.getSheetByName('Сесії');
   if (!sheet) { Logger.log('Вкладки "Сесії" немає'); return; }
 
-  var data = sheet.getDataRange().getValues();
-  var now = new Date().getTime();
-  var removed = 0;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('Сесій немає'); return; }
 
-  // Йдемо знизу вгору, щоб видалення не зсувало індекси
-  for (var i = data.length - 1; i >= 1; i--) {
+  var lastCol = Math.max(sheet.getLastColumn(), 4);
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var now = new Date().getTime();
+
+  var keep = [];
+  for (var i = 1; i < data.length; i++) {
+    if (!data[i][0]) continue;                    // порожній рядок — не зберігаємо
     var t = new Date(data[i][2]).getTime();
-    if (isNaN(t) || now - t >= SESSION_TTL_MS) {
-      sheet.deleteRow(i + 1);
-      removed++;
-    }
+    if (!isNaN(t) && now - t < SESSION_TTL_MS) keep.push(data[i]);
   }
-  Logger.log('Видалено прострочених сесій: ' + removed);
+
+  var removed = (lastRow - 1) - keep.length;
+  if (removed <= 0) {
+    Logger.log('Прострочених сесій немає. Активних: ' + keep.length);
+    return;
+  }
+
+  sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+  if (keep.length) sheet.getRange(2, 1, keep.length, lastCol).setValues(keep);
+
+  Logger.log('Видалено прострочених сесій: ' + removed + '. Лишилось активних: ' + keep.length);
 }
 
 /**
