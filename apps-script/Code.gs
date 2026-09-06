@@ -842,3 +842,104 @@ function auditCredentialZeros() {
     ? 'Знайдено проблем: ' + problems.length + '\n' + problems.join('\n')
     : 'Проблем із провідними нулями не знайдено.');
 }
+
+/**
+ * ДІАГНОСТИКА ВХОДУ.
+ * Запустити з редактора, підставивши потрібну пару, напр.:
+ *     function t() { debugLogin('066-289-56-02', '09'); }
+ * У журналі буде видно, що саме бачить бекенд і чому вхід не проходить.
+ */
+function debugLogin(login, password) {
+  var inputLogin    = String(login    == null ? '' : login).trim();
+  var inputPassword = String(password == null ? '' : password).trim();
+  Logger.log('ПЕРЕВІРКА: логін "' + inputLogin + '" · пароль "' + inputPassword + '"\n');
+
+  var ss = SpreadsheetApp.openById(MAIN_SHEET_ID);
+
+  // --- Адміністрація ---
+  var adminSheet = ss.getSheetByName('Адміністрація');
+  if (adminSheet) {
+    var adminData = adminSheet.getDataRange().getValues();
+    for (var i = 1; i < adminData.length; i++) {
+      var adminLogin = String(adminData[i][1]).trim();
+      if (adminLogin && adminLogin.toLowerCase() === inputLogin.toLowerCase()) {
+        Logger.log('Збіг у вкладці «Адміністрація», рядок ' + (i + 1) + ' (' + adminData[i][0] + ').\n' +
+                   'Пароль: ' + (passwordMatches_(inputPassword, adminData[i][2]) ? 'ЗБІГСЯ — вхід пройде як АДМІН' : 'НЕ ЗБІГСЯ'));
+        return;
+      }
+    }
+  }
+
+  // --- Активні ---
+  var emp = ss.getSheetByName('Активні');
+  if (!emp) { Logger.log('Вкладки «Активні» немає'); return; }
+  var data = emp.getDataRange().getValues();
+
+  var hits = 0;
+  for (var j = 1; j < data.length; j++) {
+    var name = String(data[j][1] || '').trim();
+    if (!name) continue;
+
+    var phone       = String(data[j][2]).trim();    // C
+    var defaultPass = String(data[j][6]).trim();    // G
+    var newLogin    = String(data[j][9]).trim();    // J
+    var newPass     = String(data[j][10]).trim();   // K
+
+    var activeLogin = newLogin !== "" ? newLogin : phone;
+    var activePass  = newPass  !== "" ? newPass  : defaultPass;
+
+    if (loginMatches_(inputLogin, activeLogin)) {
+      hits++;
+      Logger.log('Рядок ' + (j + 1) + ' · ' + name +
+        '\n   логін збігся з "' + activeLogin + '"  (джерело: ' + (newLogin ? 'колонка J' : 'колонка C — телефон') + ')' +
+        '\n   бекенд очікує пароль "' + activePass + '"  (джерело: ' + (newPass ? 'колонка K' : 'колонка G') + ')' +
+        '\n   пароль: ' + (passwordMatches_(inputPassword, activePass) ? 'ЗБІГСЯ — вхід пройде' : 'НЕ ЗБІГСЯ — ось причина відмови'));
+    }
+  }
+
+  if (!hits) {
+    Logger.log('Жоден рядок не підійшов за логіном.\n\n' +
+      'Нагадування про колонки:\n' +
+      '  логін  = J (власний), а якщо J порожня — C (телефон працівника)\n' +
+      '  пароль = K (власний), а якщо K порожня — G (стартовий)\n' +
+      '  колонки E та F — це екстрений контакт, у вході НЕ беруть участі.');
+  }
+}
+
+/**
+ * Показує, які логін і пароль бекенд вважає дійсними для КОЖНОГО працівника,
+ * і окремо тих, хто взагалі не зможе увійти. Нічого не змінює.
+ */
+function listLoginCredentials() {
+  var ss = SpreadsheetApp.openById(MAIN_SHEET_ID);
+  var sh = ss.getSheetByName('Активні');
+  if (!sh) { Logger.log('Вкладки «Активні» немає'); return; }
+
+  var data = sh.getDataRange().getValues();
+  var ok = [], broken = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][1] || '').trim();
+    if (!name) continue;
+
+    var phone       = String(data[i][2]).trim();
+    var defaultPass = String(data[i][6]).trim();
+    var newLogin    = String(data[i][9]).trim();
+    var newPass     = String(data[i][10]).trim();
+
+    var activeLogin = newLogin !== "" ? newLogin : phone;
+    var activePass  = newPass  !== "" ? newPass  : defaultPass;
+
+    if (!activeLogin || !activePass) {
+      broken.push('рядок ' + (i + 1) + ' · ' + name + ' · ' +
+        (!activeLogin ? 'НЕМАЄ ЛОГІНА — порожні і C, і J' : 'НЕМАЄ ПАРОЛЯ — порожні і G, і K'));
+      continue;
+    }
+    ok.push('рядок ' + (i + 1) + ' · ' + name +
+            ' · логін "' + activeLogin + '" (' + (newLogin ? 'J' : 'C') + ')' +
+            ' · пароль "' + activePass + '" (' + (newPass ? 'K' : 'G') + ')');
+  }
+
+  Logger.log('МОЖУТЬ УВІЙТИ (' + ok.length + '):\n' + ok.join('\n'));
+  if (broken.length) Logger.log('\n НЕ ЗМОЖУТЬ УВІЙТИ (' + broken.length + '):\n' + broken.join('\n'));
+}
